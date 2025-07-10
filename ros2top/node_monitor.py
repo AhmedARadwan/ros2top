@@ -5,8 +5,9 @@ Core node monitoring functionality
 
 import time
 import psutil
-from typing import Dict, List, Optional, NamedTuple
-from .ros2_utils import get_ros2_nodes, get_node_pid, is_ros2_available
+from typing import Dict, List, Optional, NamedTuple, Tuple
+from .ros2_utils import (get_ros2_nodes, get_node_pid, is_ros2_available, 
+                       get_ros2_nodes_with_pids, start_background_tracing, stop_background_tracing)
 from .gpu_monitor import GPUMonitor
 
 
@@ -33,6 +34,14 @@ class NodeMonitor:
         
         # Check ROS2 availability
         self.ros2_available = is_ros2_available()
+        
+        # Start background tracing if ROS2 is available
+        if self.ros2_available:
+            start_background_tracing()
+    
+    def cleanup(self):
+        """Cleanup resources including background tracing"""
+        stop_background_tracing()
         
     def is_ros2_available(self) -> bool:
         """Check if ROS2 is available"""
@@ -62,9 +71,14 @@ class NodeMonitor:
             return False
             
         try:
-            current_nodes = get_ros2_nodes()
+            # Use the new tracing-based approach
+            nodes_with_pids = get_ros2_nodes_with_pids()
+            
+            # Update processes based on discovered nodes
+            current_nodes = [node for node, pid in nodes_with_pids]
             self._remove_dead_nodes(current_nodes)
-            self._add_new_nodes(current_nodes)
+            self._add_new_nodes_with_pids(nodes_with_pids)
+            
             self.last_refresh = current_time
             return True
             
@@ -77,19 +91,17 @@ class NodeMonitor:
         for node in nodes_to_remove:
             del self.processes[node]
     
-    def _add_new_nodes(self, current_nodes: List[str]):
-        """Add new nodes to monitoring"""
-        for node in current_nodes:
+    def _add_new_nodes_with_pids(self, nodes_with_pids: List[Tuple[str, int]]):
+        """Add new nodes to monitoring using pre-discovered PIDs"""
+        for node, pid in nodes_with_pids:
             if node not in self.processes:
-                pid = get_node_pid(node)
-                if pid:
-                    try:
-                        proc = psutil.Process(pid)
-                        # Initialize CPU measurement
-                        proc.cpu_percent()
-                        self.processes[node] = proc
-                    except psutil.NoSuchProcess:
-                        pass
+                try:
+                    proc = psutil.Process(pid)
+                    # Initialize CPU measurement
+                    proc.cpu_percent()
+                    self.processes[node] = proc
+                except psutil.NoSuchProcess:
+                    pass
     
     def cleanup_dead_processes(self):
         """Remove processes that are no longer running"""

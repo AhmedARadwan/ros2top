@@ -95,8 +95,9 @@ def main():
         print("  # or")
         print("  source ~/ros2_ws/install/setup.bash")
         print()
-        print("ros2top will continue but won't show any nodes until ROS2 is available.")
+        print("ros2top will exit.")
         print()
+        sys.exit(0)
     
     # Show GPU status
     if args.no_gpu:
@@ -119,6 +120,10 @@ def main():
     except Exception as e:
         show_error_message(f"Unexpected error: {e}")
         sys.exit(1)
+    finally:
+        # Cleanup background threads
+        if hasattr(monitor, 'cleanup'):
+            monitor.cleanup()
 
 
 if __name__ == '__main__':
