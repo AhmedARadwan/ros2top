@@ -30,8 +30,8 @@ def create_argument_parser():
     parser.add_argument(
         '--refresh', '-r',
         type=float,
-        default=5.0,
-        help='Node refresh interval in seconds (default: 5.0)'
+        default=0.1,
+        help='Node refresh interval in seconds (default: 0.1)'
     )
     
     parser.add_argument(
