@@ -23,7 +23,7 @@ def is_ros2_available() -> bool:
 def get_ros2_nodes() -> List[str]:
     """Get list of ROS2 node names from the registry"""
     try:
-        cleanup_stale_registrations()  # Clean up dead registrations
+        cleanup_stale_registrations()
         registered_nodes = get_registered_nodes()
         return [node_name for node_name, _ in registered_nodes]
     except Exception:
@@ -51,7 +51,7 @@ def get_ros2_nodes_with_pids() -> List[Tuple[str, int]]:
         List of tuples: (node_name, pid)
     """
     try:
-        cleanup_stale_registrations()  # Clean up dead registrations
+        cleanup_stale_registrations()
         return get_registered_nodes()
     except Exception:
         return []

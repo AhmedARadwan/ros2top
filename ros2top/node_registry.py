@@ -140,16 +140,18 @@ def get_registered_nodes() -> List[Tuple[str, int]]:
     try:
         nodes_data = _read_node_registrations()
         
-        # Filter out stale registrations (nodes that haven't been seen in 30 seconds)
-        current_time = time.time()
+        # Filter out stale registrations (only check if process is still running)
         active_nodes = []
         
         for node_name, data in nodes_data.items():
             # Check if process is still running
             try:
                 proc = psutil.Process(data['pid'])
-                if proc.is_running() and (current_time - data['last_seen']) < 30:
+                if proc.is_running():
+                    # Process is running, include it regardless of heartbeat timing
                     active_nodes.append((node_name, data['pid']))
+                # Note: If heartbeats are being sent, we could add additional logic here
+                # to detect unresponsive but running nodes
             except psutil.NoSuchProcess:
                 # Process no longer exists, will be cleaned up later
                 pass
