@@ -137,14 +137,9 @@ class TerminalUI:
         self.status_bar = StatusBar(Rect(0, 0, width, 1))
         self.layout_manager.add_component(self.status_bar)
         
-        # System panel
+        # System overview - draw directly without panel
         system_height = self._calculate_system_panel_height(layout_config)
-        self.system_panel = Panel(
-            Rect(0, 1, width, system_height),
-            "System Overview"
-        )
-        self._setup_system_panel(layout_config)
-        self.layout_manager.add_component(self.system_panel)
+        self.system_start_row = 1
         
         # Nodes table
         table_y = 1 + system_height
@@ -178,62 +173,6 @@ class TerminalUI:
             base_height += self.monitor.get_gpu_count()
             
         return min(base_height + 2, 12)  # Cap at 12 lines
-    
-    def _setup_system_panel(self, config: Dict):
-        """Setup system panel components"""
-        self.system_panel.clear_components()
-        
-        # CPU progress bars
-        if config['show_detailed_cpu']:
-            self._add_detailed_cpu_bars(config)
-        else:
-            self._add_summary_cpu_bar(config)
-        
-        # Memory bar
-        memory_rect = Rect(0, 0, config.get('progress_bar_width', 10), 1)
-        memory_bar = ProgressBar(memory_rect)
-        memory_bar.set_label("Memory:")
-        self.system_panel.add_component(memory_bar)
-        
-        # GPU bars
-        if config['show_gpu'] and self.monitor.is_gpu_available():
-            self._add_gpu_bars(config)
-    
-    def _add_detailed_cpu_bars(self, config: Dict):
-        """Add detailed CPU progress bars"""
-        cpu_count = psutil.cpu_count() or 1
-        bar_width = config.get('progress_bar_width', 10)
-        
-        for i in range(cpu_count):
-            cpu_rect = Rect(0, 0, bar_width, 1)
-            cpu_bar = ProgressBar(cpu_rect)
-            cpu_bar.set_label(f"CPU{i+1:2d}:")
-            self.system_panel.add_component(cpu_bar)
-    
-    def _add_summary_cpu_bar(self, config: Dict):
-        """Add summary CPU progress bar"""
-        cpu_rect = Rect(0, 0, config.get('progress_bar_width', 10), 1)
-        cpu_bar = ProgressBar(cpu_rect)
-        cpu_bar.set_label("CPU:")
-        self.system_panel.add_component(cpu_bar)
-    
-    def _add_gpu_bars(self, config: Dict):
-        """Add GPU progress bars"""
-        gpu_count = self.monitor.get_gpu_count()
-        bar_width = config.get('progress_bar_width', 10)
-        
-        for i in range(gpu_count):
-            # GPU utilization
-            gpu_rect = Rect(0, 0, bar_width, 1)
-            gpu_bar = ProgressBar(gpu_rect)
-            gpu_bar.set_label(f"GPU{i}:")
-            self.system_panel.add_component(gpu_bar)
-            
-            # GPU memory
-            mem_rect = Rect(0, 0, bar_width, 1)
-            mem_bar = ProgressBar(mem_rect)
-            mem_bar.set_label(f"GM{i}:")
-            self.system_panel.add_component(mem_bar)
     
     def _get_table_headers(self, config: Dict) -> List[str]:
         """Get table headers based on layout configuration"""
@@ -273,21 +212,136 @@ class TerminalUI:
                 self.monitor.cleanup_dead_processes()
                 self.stats['updates'] += 1
             
-            # Update components
+            # Clear screen and draw everything
+            self.stdscr.erase()
+            
+            # Update and draw components
             self._update_status_bar()
-            self._update_system_panel()
             self._update_nodes_table()
             
-            # Force redraw
-            self.stdscr.erase()
-            self.layout_manager.draw(self.colors)
-            self.stdscr.refresh()
+            # Draw system overview directly
+            self._draw_system_overview()
             
+            # Draw layout manager components
+            self.layout_manager.draw(self.colors)
+            
+            self.stdscr.refresh()
             self.last_update = current_time
             
         except curses.error as e:
             # Handle terminal too small or other display errors
             self._show_minimal_ui(f"Terminal too small or display error: {e}")
+    
+    def _draw_system_overview(self):
+        """Draw system overview directly on screen"""
+        if not self.stdscr:
+            return
+        
+        try:
+            max_y, max_x = self.stdscr.getmaxyx()
+            current_row = self.system_start_row
+            
+            # Get system data
+            memory = psutil.virtual_memory()
+            cpu_percents = psutil.cpu_percent(percpu=True) if not self.paused else []
+            
+            # Draw CPU usage bars
+            if cpu_percents:
+                # Group CPUs for display
+                cpus_per_row = max(1, (max_x - 10) // 25)  # Each CPU bar takes ~25 chars
+                
+                for i in range(0, len(cpu_percents), cpus_per_row):
+                    if current_row >= max_y - 5:  # Leave space for rest of UI
+                        break
+                        
+                    line = ""
+                    max_cpu = 0
+                    for j in range(cpus_per_row):
+                        cpu_idx = i + j
+                        if cpu_idx >= len(cpu_percents):
+                            break
+                            
+                        cpu_percent = cpu_percents[cpu_idx]
+                        max_cpu = max(max_cpu, cpu_percent)
+                        bar = self._create_progress_bar(cpu_percent, 10)
+                        line += f"CPU{cpu_idx+1:2d}[{bar}]{cpu_percent:5.1f}% "
+                    
+                    if line:
+                        color = self._get_usage_color(max_cpu)
+                        self._addstr_with_color(current_row, 0, line.rstrip(), color)
+                        current_row += 1
+            
+            # Draw memory usage
+            if current_row < max_y - 4:
+                mem_percent = memory.percent
+                mem_bar = self._create_progress_bar(mem_percent, 20)
+                mem_line = f"Mem[{mem_bar}] {memory.used // (1024**3):.1f}G/{memory.total // (1024**3):.1f}G"
+                self._addstr_with_color(current_row, 0, mem_line, self._get_usage_color(mem_percent))
+                current_row += 1
+            
+            # Draw GPU info
+            if current_row < max_y - 3 and self.monitor.is_gpu_available():
+                for gpu_id in range(self.monitor.get_gpu_count()):
+                    if current_row >= max_y - 3:
+                        break
+                        
+                    gpu_info = self.monitor.gpu_monitor.get_gpu_info(gpu_id)
+                    if gpu_info:
+                        gpu_mem_percent = (gpu_info['memory_used_mb'] / gpu_info['memory_total_mb']) * 100
+                        gpu_util_percent = gpu_info['utilization_gpu']
+                        
+                        gpu_bar = self._create_progress_bar(gpu_util_percent, 10)
+                        mem_bar = self._create_progress_bar(gpu_mem_percent, 10)
+                        
+                        gpu_line = f"GPU{gpu_id}[{gpu_bar}]{gpu_util_percent:5.1f}% Mem[{mem_bar}]{gpu_info['memory_used_mb']:5.0f}M/{gpu_info['memory_total_mb']:5.0f}M"
+                        self._addstr_with_color(current_row, 0, gpu_line, 6)  # Magenta for GPU
+                        current_row += 1
+            
+            # ROS2 status
+            if current_row < max_y - 2:
+                ros2_status = "✓ ROS2 Active" if self.monitor.is_ros2_available() else "✗ ROS2 Not Available"
+                node_count = self.monitor.get_nodes_count()
+                status_line = f"{ros2_status} | Nodes: {node_count}"
+                self._addstr_with_color(current_row, 0, status_line, 4)  # Cyan
+                
+        except curses.error:
+            pass
+    
+    def _create_progress_bar(self, percent: float, width: int = 10) -> str:
+        """Create a progress bar string"""
+        filled = int((percent / 100.0) * width)
+        bar = "█" * filled + "░" * (width - filled)
+        return bar
+    
+    def _get_usage_color(self, percent: float) -> int:
+        """Get color based on usage percentage"""
+        if not curses.has_colors():
+            return 0
+        if percent >= 80:
+            return 4  # Red/Error
+        elif percent >= 50:
+            return 3  # Yellow/Warning
+        else:
+            return 2  # Green/Success
+    
+    def _addstr_with_color(self, y: int, x: int, text: str, color_pair: int = 0):
+        """Add string with color if available"""
+        try:
+            max_y, max_x = self.stdscr.getmaxyx()
+            if y >= max_y or x >= max_x:
+                return
+                
+            # Truncate text if too long
+            available_width = max_x - x
+            if len(text) > available_width:
+                text = text[:available_width]
+                
+            if curses.has_colors() and color_pair > 0:
+                self.stdscr.addstr(y, x, text, curses.color_pair(color_pair))
+            else:
+                self.stdscr.addstr(y, x, text)
+        except curses.error:
+            pass
     
     def _update_status_bar(self):
         """Update status bar content"""
@@ -316,49 +370,6 @@ class TerminalUI:
         node_count = self.monitor.get_nodes_count()
         self.stats['nodes_peak'] = max(self.stats['nodes_peak'], node_count)
         self.status_bar.add_item(f"Nodes:{node_count}", self.colors.info)
-    
-    def _update_system_panel(self):
-        """Update system panel progress bars"""
-        if not self.system_panel:
-            return
-            
-        component_idx = 0
-        
-        # Update CPU bars
-        cpu_percents = psutil.cpu_percent(percpu=True) if not self.paused else []
-        
-        for i, component in enumerate(self.system_panel.components):
-            if isinstance(component, ProgressBar):
-                if component.label.startswith("CPU"):
-                    if component.label == "CPU:":
-                        # Summary CPU
-                        avg_cpu = sum(cpu_percents) / len(cpu_percents) if cpu_percents else 0
-                        component.set_value(avg_cpu)
-                    else:
-                        # Individual CPU
-                        if component_idx < len(cpu_percents):
-                            component.set_value(cpu_percents[component_idx])
-                        component_idx += 1
-                        
-                elif component.label.startswith("Memory"):
-                    memory = psutil.virtual_memory()
-                    component.set_value(memory.percent)
-                    
-                elif component.label.startswith("GPU"):
-                    gpu_id = int(component.label[3])
-                    if self.monitor.is_gpu_available():
-                        gpu_info = self.monitor.gpu_monitor.get_gpu_info(gpu_id)
-                        if gpu_info:
-                            component.set_value(gpu_info['utilization_gpu'])
-                            
-                elif component.label.startswith("GM"):
-                    gpu_id = int(component.label[2])
-                    if self.monitor.is_gpu_available():
-                        gpu_info = self.monitor.gpu_monitor.get_gpu_info(gpu_id)
-                        if gpu_info:
-                            mem_percent = (gpu_info['memory_used_mb'] / 
-                                         gpu_info['memory_total_mb'] * 100)
-                            component.set_value(mem_percent)
     
     def _update_nodes_table(self):
         """Update nodes table data"""
@@ -403,7 +414,7 @@ class TerminalUI:
                     proc = psutil.Process(node.pid)
                     cmd = " ".join(proc.cmdline()[:3])  # First 3 args
                     row.append(cmd[:20])  # Truncate
-                except:
+                except (psutil.Error, AttributeError):
                     row.append("--")
             
             rows.append(row)

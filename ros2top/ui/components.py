@@ -454,21 +454,42 @@ class Panel(UIComponent):
         """Resize panel and redistribute component space"""
         super().resize(new_rect)
         
-        # Simple vertical stacking for now
-        if self.components:
-            available_height = self.rect.height - (2 if self.border else 0)
-            if self.title:
-                available_height -= 1
+        # Calculate available space for components
+        if not self.components:
+            return
             
-            component_height = max(1, available_height // len(self.components))
-            y_offset = self.rect.y + (1 if self.border else 0) + (1 if self.title else 0)
+        content_x = self.rect.x + (1 if self.border else 0)
+        content_y = self.rect.y + (1 if self.border else 0)
+        content_width = self.rect.width - (2 if self.border else 0)
+        content_height = self.rect.height - (2 if self.border else 0)
+        
+        # Account for title
+        if self.title:
+            content_y += 1
+            content_height -= 1
+        
+        # Distribute space evenly among components
+        if content_height > 0:
+            component_height = max(1, content_height // len(self.components))
             
             for i, component in enumerate(self.components):
+                comp_y = content_y + i * component_height
+                
+                # Ensure we don't exceed panel bounds
+                if comp_y >= self.rect.bottom:
+                    break
+                    
+                # Adjust height for last component to fill remaining space
+                if i == len(self.components) - 1:
+                    comp_height = self.rect.bottom - comp_y - (1 if self.border else 0)
+                else:
+                    comp_height = component_height
+                
                 comp_rect = Rect(
-                    x=self.rect.x + (1 if self.border else 0),
-                    y=y_offset + i * component_height,
-                    width=self.rect.width - (2 if self.border else 0),
-                    height=component_height
+                    x=content_x,
+                    y=comp_y,
+                    width=max(1, content_width),
+                    height=max(1, comp_height)
                 )
                 component.resize(comp_rect)
     
