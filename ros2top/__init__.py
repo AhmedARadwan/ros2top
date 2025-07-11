@@ -9,7 +9,7 @@ __email__ = "ahmed.ali.radwan94@gmail.com"
 # Import main monitoring functionality
 from .node_monitor import NodeMonitor
 from .gpu_monitor import GPUMonitor
-from .terminal_ui import run_ui
+from .ui.terminal_ui import run_ui
 
 # Import node registration API for external use
 from .node_registry import (

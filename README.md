@@ -67,11 +67,46 @@ ros2top --version           # Show version
 
 ### Interactive Controls
 
-| Key        | Action                  |
-| ---------- | ----------------------- |
-| `q` or `Q` | Quit                    |
-| `r` or `R` | Force refresh node list |
-| `h` or `H` | Show help dialog        |
+The enhanced terminal UI provides responsive and interactive controls:
+
+| Key        | Action                        |
+| ---------- | ----------------------------- |
+| `q` or `Q` | Quit application              |
+| `h` or `H` | Show help dialog              |
+| `r` or `R` | Force refresh node list       |
+| `p` or `P` | Pause/resume monitoring       |
+| `+` or `=` | Increase refresh rate         |
+| `-`        | Decrease refresh rate         |
+| `↑` / `↓`  | Navigate through nodes        |
+| `Tab`      | Cycle focus between UI panels |
+| `Space`    | Force immediate update        |
+| `Home/End` | Jump to first/last node       |
+
+## Enhanced Terminal UI
+
+The ros2top interface now features a **responsive, adaptive design** that automatically adjusts to your terminal size:
+
+### Responsive Layout
+
+- **Small terminals (< 80 cols)**: Essential info only
+- **Medium terminals (80-120 cols)**: Full monitoring with detailed CPU
+- **Large terminals (> 120 cols)**: Extended view with additional columns
+
+### Visual Features
+
+- **Color-coded usage bars**: Green (low), Yellow (medium), Red (high)
+- **Real-time progress bars** for CPU, memory, and GPU
+- **Interactive navigation** with keyboard shortcuts
+- **Adaptive refresh rates** for optimal performance
+
+### System Overview Panel
+
+The top panel shows real-time system information:
+
+- CPU usage (per-core or summary based on terminal size)
+- Memory usage with progress bar
+- GPU utilization and memory (if available)
+- ROS2 status and active node count
 
 ## Display Columns
 

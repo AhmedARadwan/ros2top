@@ -6,7 +6,7 @@ Main entry point for ros2top
 import sys
 import argparse
 from .node_monitor import NodeMonitor
-from .terminal_ui import run_ui, show_error_message
+from .ui.terminal_ui import run_ui, show_error_message
 
 
 def create_argument_parser():
