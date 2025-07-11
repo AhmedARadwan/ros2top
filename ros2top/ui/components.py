@@ -227,12 +227,28 @@ class Table(UIComponent):
             for i, cell in enumerate(row[:len(self.column_widths)]):
                 self.column_widths[i] = max(self.column_widths[i], len(str(cell)))
         
-        # Fit to available width
-        total_width = sum(self.column_widths) + len(self.column_widths) - 1  # separators
-        if total_width > self.rect.width:
-            # Shrink columns proportionally
-            scale_factor = (self.rect.width - len(self.column_widths) + 1) / total_width
-            self.column_widths = [max(3, int(w * scale_factor)) for w in self.column_widths]
+        # Special handling for Command column (last column) to use remaining width
+        if len(self.column_widths) > 0:
+            # Calculate space used by all columns except the last one
+            other_columns_width = sum(self.column_widths[:-1]) + len(self.column_widths) - 1  # separators
+            remaining_width = self.rect.width - other_columns_width
+            
+            # Give the last column (Command) all remaining space, with a minimum width
+            if remaining_width > 10:  # Minimum width for command column
+                self.column_widths[-1] = remaining_width
+            else:
+                # If not enough space, shrink all columns proportionally except command
+                total_width = sum(self.column_widths) + len(self.column_widths) - 1  # separators
+                if total_width > self.rect.width:
+                    # Keep command column at minimum and shrink others
+                    self.column_widths[-1] = max(10, self.rect.width // 4)  # At least 1/4 of width for command
+                    available_for_others = self.rect.width - self.column_widths[-1] - len(self.column_widths) + 1
+                    if available_for_others > 0 and len(self.column_widths) > 1:
+                        other_total = sum(self.column_widths[:-1])
+                        if other_total > 0:
+                            scale_factor = available_for_others / other_total
+                            for i in range(len(self.column_widths) - 1):
+                                self.column_widths[i] = max(3, int(self.column_widths[i] * scale_factor))
     
     def set_data(self, rows: List[List[str]]):
         """Set table data"""
@@ -350,15 +366,22 @@ class Table(UIComponent):
             if x_pos >= self.rect.right:
                 break
                 
-            # Truncate header if necessary
-            header_text = header[:width].ljust(width)
+            # Special handling for the last column (Command) - use remaining width
+            if i == len(self.headers) - 1:
+                remaining_width = self.rect.right - x_pos
+                header_text = header[:remaining_width] if remaining_width > 0 else ""
+            else:
+                # Truncate header if necessary for other columns
+                header_text = header[:width].ljust(width)
             
             if curses.has_colors():
                 stdscr.addstr(y, x_pos, header_text, curses.color_pair(colors.header))
             else:
                 stdscr.addstr(y, x_pos, header_text)
             
-            x_pos += width
+            x_pos += len(header_text)
+            
+            # Add separator only if not the last column and there's space
             if i < len(self.headers) - 1 and x_pos < self.rect.right:
                 stdscr.addstr(y, x_pos, " ")
                 x_pos += 1
@@ -375,15 +398,22 @@ class Table(UIComponent):
             if x_pos >= self.rect.right:
                 break
                 
-            # Truncate cell if necessary
-            cell_text = str(cell)[:width].ljust(width)
+            # Special handling for the last column (Command) - use remaining width
+            if i == len(self.column_widths) - 1:
+                remaining_width = self.rect.right - x_pos
+                cell_text = str(cell)[:remaining_width] if remaining_width > 0 else ""
+            else:
+                # Truncate cell if necessary for other columns
+                cell_text = str(cell)[:width].ljust(width)
             
             if is_selected and curses.has_colors():
                 stdscr.addstr(y, x_pos, cell_text, curses.color_pair(colors.accent) | curses.A_REVERSE)
             else:
                 stdscr.addstr(y, x_pos, cell_text)
             
-            x_pos += width
+            x_pos += len(cell_text)
+            
+            # Add separator only if not the last column and there's space
             if i < len(row) - 1 and x_pos < self.rect.right:
                 if is_selected and curses.has_colors():
                     stdscr.addstr(y, x_pos, " ", curses.color_pair(colors.accent) | curses.A_REVERSE)

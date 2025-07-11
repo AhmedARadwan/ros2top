@@ -28,10 +28,14 @@ class TerminalUI:
         self.colors = ColorScheme()
         
         # UI Components
-        self.status_bar = None
         self.system_panel = None
         self.nodes_table = None
         self.help_panel = None
+        
+        # Section boundaries (initialized with defaults)
+        self.system_section = None
+        self.table_section = None
+        self.controls_section = None
         
         # State
         self.show_help = False
@@ -129,34 +133,40 @@ class TerminalUI:
     
     def _create_ui_components(self, width: int, height: int):
         """Create UI components based on terminal size"""
-        layout_config = self.responsive_layout.get_layout_config(width, height)
-        
         self.layout_manager.clear_components()
         
-        # Status bar (top)
-        self.status_bar = StatusBar(Rect(0, 0, width, 1))
-        self.layout_manager.add_component(self.status_bar)
+        # Calculate section heights
+        system_height = max(4, height // 4)  # Quarter of the view for system info
+        controls_height = 2  # Last two lines for shortcuts
+        table_height = height - system_height - controls_height  # Middle section
         
-        # System overview - draw directly without panel
-        system_height = self._calculate_system_panel_height(layout_config)
-        self.system_start_row = 1
+        # Store section boundaries
+        self.system_section = {
+            'start_y': 0,
+            'height': system_height,
+            'width': width
+        }
         
-        # Nodes table
-        table_y = 1 + system_height
-        table_height = height - table_y - 2  # Reserve space for help
+        self.table_section = {
+            'start_y': system_height,
+            'height': table_height,
+            'width': width
+        }
         
-        headers = self._get_table_headers(layout_config)
+        self.controls_section = {
+            'start_y': height - controls_height,
+            'height': controls_height,
+            'width': width
+        }
+        
+        # Create table component for middle section
+        headers = ["PID", "Uptime", "%CPU", "RAM(MB)", "GPU#", "%GPU", "GMEM(MB)", "Command"]
         self.nodes_table = Table(
-            Rect(0, table_y, width, table_height),
+            Rect(0, self.table_section['start_y'], width, table_height),
             headers
         )
         self.nodes_table.selectable = True
         self.layout_manager.add_component(self.nodes_table)
-        
-        # Help/status bar (bottom)
-        help_bar = StatusBar(Rect(0, height - 1, width, 1))
-        self._update_help_bar(help_bar)
-        self.layout_manager.add_component(help_bar)
     
     def _calculate_system_panel_height(self, config: Dict) -> int:
         """Calculate height needed for system panel"""
@@ -194,16 +204,18 @@ class TerminalUI:
         """Update UI components with current data"""
         current_time = time.time()
         
+        # Check if terminal was resized
+        terminal_resized = self.layout_manager.check_resize()
+        
         # Check if we need to update
-        if (current_time - self.last_update < self.update_interval and 
-            not self.layout_manager.check_resize()):
+        if (current_time - self.last_update < self.update_interval and not terminal_resized):
             return
             
         try:
             height, width = self.stdscr.getmaxyx()
             
-            # Recreate components if needed
-            if not self.status_bar or self.layout_manager.check_resize():
+            # Only recreate components if terminal was resized OR components don't exist
+            if not self.nodes_table or terminal_resized:
                 self._create_ui_components(width, height)
             
             # Update monitoring data
@@ -215,14 +227,12 @@ class TerminalUI:
             # Clear screen and draw everything
             self.stdscr.erase()
             
-            # Update and draw components
-            self._update_status_bar()
-            self._update_nodes_table()
+            # Draw the three sections
+            self._draw_system_overview()      # Top quarter section
+            self._update_nodes_table()        # Update table data
+            self._draw_controls_section()     # Bottom two lines
             
-            # Draw system overview directly
-            self._draw_system_overview()
-            
-            # Draw layout manager components
+            # Draw layout manager components (table)
             self.layout_manager.draw(self.colors)
             
             self.stdscr.refresh()
@@ -233,76 +243,101 @@ class TerminalUI:
             self._show_minimal_ui(f"Terminal too small or display error: {e}")
     
     def _draw_system_overview(self):
-        """Draw system overview directly on screen"""
-        if not self.stdscr:
+        """Draw system overview in the top quarter section"""
+        if not self.stdscr or not self.system_section:
             return
         
         try:
-            max_y, max_x = self.stdscr.getmaxyx()
-            current_row = self.system_start_row
+            section = self.system_section
+            current_row = section['start_y']
+            max_width = section['width']
             
             # Get system data
             memory = psutil.virtual_memory()
             cpu_percents = psutil.cpu_percent(percpu=True) if not self.paused else []
             
-            # Draw CPU usage bars
-            if cpu_percents:
-                # Group CPUs for display
-                cpus_per_row = max(1, (max_x - 10) // 25)  # Each CPU bar takes ~25 chars
+            # Draw CPU usage - show all CPUs with usage bars
+            if cpu_percents and current_row < section['start_y'] + section['height'] - 1:
+                # Calculate how many CPUs we can fit per row
+                cpu_bar_width = 12  # Fixed width for each CPU display
+                cpus_per_row = max(1, max_width // (cpu_bar_width + 1))
                 
                 for i in range(0, len(cpu_percents), cpus_per_row):
-                    if current_row >= max_y - 5:  # Leave space for rest of UI
+                    if current_row >= section['start_y'] + section['height'] - 1:
                         break
                         
                     line = ""
-                    max_cpu = 0
                     for j in range(cpus_per_row):
                         cpu_idx = i + j
                         if cpu_idx >= len(cpu_percents):
                             break
                             
                         cpu_percent = cpu_percents[cpu_idx]
-                        max_cpu = max(max_cpu, cpu_percent)
-                        bar = self._create_progress_bar(cpu_percent, 10)
-                        line += f"CPU{cpu_idx+1:2d}[{bar}]{cpu_percent:5.1f}% "
+                        bar = self._create_progress_bar(cpu_percent, 8)
+                        line += f"C{cpu_idx:02d}[{bar}]{cpu_percent:4.1f}% "
                     
-                    if line:
-                        color = self._get_usage_color(max_cpu)
+                    if line and current_row < section['start_y'] + section['height']:
+                        color = self._get_usage_color(max(cpu_percents[i:i+cpus_per_row]))
                         self._addstr_with_color(current_row, 0, line.rstrip(), color)
                         current_row += 1
             
-            # Draw memory usage
-            if current_row < max_y - 4:
+            # Draw RAM usage
+            if current_row < section['start_y'] + section['height']:
                 mem_percent = memory.percent
                 mem_bar = self._create_progress_bar(mem_percent, 20)
-                mem_line = f"Mem[{mem_bar}] {memory.used // (1024**3):.1f}G/{memory.total // (1024**3):.1f}G"
+                mem_gb_used = memory.used / (1024**3)
+                mem_gb_total = memory.total / (1024**3)
+                mem_line = f"RAM[{mem_bar}] {mem_gb_used:.1f}G/{mem_gb_total:.1f}G ({mem_percent:.1f}%)"
                 self._addstr_with_color(current_row, 0, mem_line, self._get_usage_color(mem_percent))
                 current_row += 1
             
-            # Draw GPU info
-            if current_row < max_y - 3 and self.monitor.is_gpu_available():
+            # Draw GPU usage and GPU RAM usage
+            if self.monitor.is_gpu_available() and current_row < section['start_y'] + section['height']:
                 for gpu_id in range(self.monitor.get_gpu_count()):
-                    if current_row >= max_y - 3:
+                    if current_row >= section['start_y'] + section['height']:
                         break
                         
                     gpu_info = self.monitor.gpu_monitor.get_gpu_info(gpu_id)
                     if gpu_info:
-                        gpu_mem_percent = (gpu_info['memory_used_mb'] / gpu_info['memory_total_mb']) * 100
-                        gpu_util_percent = gpu_info['utilization_gpu']
+                        gpu_util = gpu_info['utilization_gpu']
+                        gpu_mem_used = gpu_info['memory_used_mb']
+                        gpu_mem_total = gpu_info['memory_total_mb']
+                        gpu_mem_percent = (gpu_mem_used / gpu_mem_total) * 100 if gpu_mem_total > 0 else 0
                         
-                        gpu_bar = self._create_progress_bar(gpu_util_percent, 10)
-                        mem_bar = self._create_progress_bar(gpu_mem_percent, 10)
-                        
-                        gpu_line = f"GPU{gpu_id}[{gpu_bar}]{gpu_util_percent:5.1f}% Mem[{mem_bar}]{gpu_info['memory_used_mb']:5.0f}M/{gpu_info['memory_total_mb']:5.0f}M"
-                        self._addstr_with_color(current_row, 0, gpu_line, 6)  # Magenta for GPU
+                        # GPU utilization line
+                        gpu_bar = self._create_progress_bar(gpu_util, 15)
+                        gpu_line = f"GPU{gpu_id}[{gpu_bar}] {gpu_util:.1f}%"
+                        self._addstr_with_color(current_row, 0, gpu_line, self._get_usage_color(gpu_util))
                         current_row += 1
+                        
+                        # GPU memory line
+                        if current_row < section['start_y'] + section['height']:
+                            gpu_mem_bar = self._create_progress_bar(gpu_mem_percent, 15)
+                            gpu_mem_line = f"GMEM[{gpu_mem_bar}] {gpu_mem_used:.0f}M/{gpu_mem_total:.0f}M ({gpu_mem_percent:.1f}%)"
+                            self._addstr_with_color(current_row, 0, gpu_mem_line, self._get_usage_color(gpu_mem_percent))
+                            current_row += 1
+                
+        except curses.error:
+            pass
+    
+    def _draw_controls_section(self):
+        """Draw controls/shortcuts in the bottom section"""
+        if not self.stdscr or not self.controls_section:
+            return
+        
+        try:
+            section = self.controls_section
             
-            # ROS2 status
-            if current_row < max_y - 2:
-                ros2_status = "✓ ROS2 Active" if self.monitor.is_ros2_available() else "✗ ROS2 Not Available"
+            # Line 1: Main controls
+            controls_line1 = "q:Quit  h:Help  r:Refresh  p:Pause/Resume  ↑↓:Navigate  Tab:Focus"
+            self._addstr_with_color(section['start_y'], 0, controls_line1[:section['width']], 0)
+            
+            # Line 2: Status and additional info
+            if section['height'] > 1:
+                ros2_status = "ROS2✓" if self.monitor.is_ros2_available() else "ROS2✗"
                 node_count = self.monitor.get_nodes_count()
-                status_line = f"{ros2_status} | Nodes: {node_count}"
-                self._addstr_with_color(current_row, 0, status_line, 4)  # Cyan
+                status_info = f"{ros2_status} | Nodes:{node_count} | +/-:Speed | Space:Update"
+                self._addstr_with_color(section['start_y'] + 1, 0, status_info[:section['width']], 4)
                 
         except curses.error:
             pass
@@ -343,88 +378,62 @@ class TerminalUI:
         except curses.error:
             pass
     
-    def _update_status_bar(self):
-        """Update status bar content"""
-        if not self.status_bar:
-            return
-            
-        # Main status
-        uptime = time.time() - self.stats['start_time']
-        status_text = f"ros2top - {self.stats['updates']} updates - {uptime:.0f}s uptime"
-        
-        if self.paused:
-            status_text += " [PAUSED]"
-            
-        self.status_bar.set_text(status_text)
-        
-        # Right side items
-        self.status_bar.clear_items()
-        
-        # ROS2 status
-        if self.monitor.is_ros2_available():
-            self.status_bar.add_item("ROS2✓", self.colors.success)
-        else:
-            self.status_bar.add_item("ROS2✗", self.colors.error)
-        
-        # Node count
-        node_count = self.monitor.get_nodes_count()
-        self.stats['nodes_peak'] = max(self.stats['nodes_peak'], node_count)
-        self.status_bar.add_item(f"Nodes:{node_count}", self.colors.info)
-    
     def _update_nodes_table(self):
-        """Update nodes table data"""
+        """Update nodes table data with specified format"""
         if not self.nodes_table:
             return
             
         nodes = self.monitor.get_node_info_list()
         
-        # Convert to table rows
+        # Calculate available width for command column
+        # Fixed widths for other columns: PID(7), Uptime(8), %CPU(6), RAM(MB)(8), GPU#(4), %GPU(6), GMEM(MB)(9)
+        fixed_columns_width = 7 + 8 + 6 + 8 + 4 + 6 + 9  # Total: 48 chars
+        separators_width = 7  # 7 separators between 8 columns
+        available_width = self.table_section['width'] if hasattr(self, 'table_section') and self.table_section else 80
+        command_width = max(20, available_width - fixed_columns_width - separators_width)
+        
+        # Convert to table rows with specified columns:
+        # PID, Uptime, %CPU, RAM(MB), GPU#, %GPU, GMEM(MB), Command
         rows = []
         for node in nodes:
+            # Calculate uptime (simplified - could be enhanced)
+            uptime = "running"  # Placeholder - could calculate from process start time
+            
+            # Get process command - use full available width
+            command = "unknown"
+            try:
+                proc = psutil.Process(node.pid)
+                cmd_line = proc.cmdline()
+                if cmd_line:
+                    command = ' '.join(cmd_line)  # Full command line
+                    # Truncate to available width
+                    if len(command) > command_width:
+                        command = command[:command_width - 3] + "..."
+            except (psutil.Error, AttributeError):
+                command = "unknown"
+            
             row = [
-                node.name,
-                str(node.pid),
-                f"{node.cpu_percent:.1f}",
-                f"{node.ram_mb:.1f}"
+                str(node.pid),                    # PID
+                uptime,                          # Uptime
+                f"{node.cpu_percent:.1f}",       # %CPU
+                f"{node.ram_mb:.1f}",            # RAM(MB)
             ]
             
-            # Add GPU columns if enabled
-            if self.monitor.is_gpu_available():
-                if node.gpu_device_id >= 0:
-                    row.extend([
-                        str(node.gpu_device_id),
-                        f"{node.gpu_utilization:.1f}",
-                        f"{node.gpu_memory_mb:.0f}"
-                    ])
-                else:
-                    row.extend(["--", "--", "--"])
+            # Add GPU columns
+            if node.gpu_device_id >= 0:
+                row.extend([
+                    str(node.gpu_device_id),           # GPU#
+                    f"{node.gpu_utilization:.1f}",     # %GPU
+                    f"{node.gpu_memory_mb:.0f}",       # GMEM(MB)
+                ])
+            else:
+                row.extend(["--", "--", "--"])
             
-            # Add extra columns for larger screens
-            headers = self.nodes_table.headers
-            if "Status" in headers:
-                row.append("Running")  # Could add more sophisticated status
-                
-            if "Uptime" in headers:
-                # Simple uptime calculation
-                row.append("--")  # Placeholder
-                
-            if "Command" in headers:
-                # Process command line (simplified)
-                try:
-                    proc = psutil.Process(node.pid)
-                    cmd = " ".join(proc.cmdline()[:3])  # First 3 args
-                    row.append(cmd[:20])  # Truncate
-                except (psutil.Error, AttributeError):
-                    row.append("--")
+            row.append(command)                   # Command
             
             rows.append(row)
         
         self.nodes_table.set_data(rows)
-    
-    def _update_help_bar(self, help_bar: StatusBar):
-        """Update help bar with key bindings"""
-        help_text = "q:Quit r:Refresh p:Pause h:Help ↑↓:Navigate Tab:Focus"
-        help_bar.set_text(help_text)
     
     def _handle_input(self):
         """Handle keyboard input"""
