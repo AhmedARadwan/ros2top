@@ -15,6 +15,7 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 - 🏷️ **Process tree awareness** (includes child processes)
 - 🕵️ **Advanced node detection** using ROS2 tracing for reliable C++ node discovery
 - 🧵 **Background tracing** on separate thread for responsive UI
+- 📝 **Node registration API** for reliable node-to-monitor communication
 
 ## Installation
 
@@ -178,7 +179,8 @@ ros2top/
 │   ├── node_monitor.py  # Core monitoring logic
 │   ├── gpu_monitor.py   # GPU monitoring
 │   ├── terminal_ui.py   # Curses interface
-│   └── ros2_utils.py    # ROS2 utilities
+│   ├── node_registry.py # Node registration system
+│   └── ros2_utils.py    # Simplified ROS2 utilities
 ├── setup.py             # Package setup
 └── README.md           # This file
 ```
@@ -216,3 +218,114 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Inspired by `htop` and `nvtop`
 - Built for the ROS2 community
 - Uses `psutil` for system monitoring and `pynvml` for GPU monitoring
+
+## Node Registration API
+
+For the most reliable monitoring, ROS2 nodes can register themselves with `ros2top`. This is especially useful for:
+
+- Multiple nodes running in the same Python process
+- Complex applications where automatic detection might miss some nodes
+- Getting additional metadata about nodes
+
+### Basic Registration
+
+```python
+import ros2top
+
+# Register your node (call this once when your node starts)
+ros2top.register_node('/my_node_name')
+
+# Send periodic heartbeats (optional, but recommended)
+ros2top.heartbeat('/my_node_name')
+
+# Unregister when shutting down (optional, automatic cleanup on process exit)
+ros2top.unregister_node('/my_node_name')
+```
+
+### Advanced Registration with Metadata
+
+```python
+import ros2top
+
+# Register with additional information
+ros2top.register_node('/camera_processor', {
+    'description': 'Processes camera feed for object detection',
+    'type': 'vision_processor',
+    'input_topics': ['/camera/image_raw'],
+    'output_topics': ['/detected_objects'],
+    'framerate': 30
+})
+
+# In your main loop, send heartbeats every few seconds
+ros2top.heartbeat('/camera_processor')
+```
+
+### Example: Multiple Nodes in One Process
+
+```python
+import ros2top
+import time
+
+def main():
+    # Register multiple nodes running in this process
+    ros2top.register_node('/human_tracker', {'type': 'detector'})
+    ros2top.register_node('/video_publisher', {'type': 'publisher'})
+
+    try:
+        while True:
+            # Your processing logic here
+            do_object_detection()
+
+            # Send heartbeats every 5 seconds
+            ros2top.heartbeat('/human_tracker')
+            ros2top.heartbeat('/video_publisher')
+
+            time.sleep(5)
+
+    finally:
+        # Cleanup (optional - happens automatically on exit)
+        ros2top.unregister_node('/human_tracker')
+        ros2top.unregister_node('/video_publisher')
+```
+
+### Benefits of Registration
+
+- **Guaranteed detection**: Registered nodes will always be detected by `ros2top`
+- **Immediate visibility**: No waiting for tracing or process scanning
+- **Rich metadata**: Include custom information about your nodes
+- **Multi-process support**: Perfect for complex applications
+- **Heartbeat monitoring**: Detect unresponsive nodes even if process is running
+
+## Node Detection
+
+`ros2top` uses a **node registration system** for reliable node detection:
+
+### Primary Method: Node Registration API
+
+The most reliable way is for ROS2 nodes to explicitly register themselves:
+
+```python
+import ros2top
+
+# Register your node
+ros2top.register_node('/my_node', {'description': 'My awesome node'})
+
+# Send periodic heartbeats (recommended)
+ros2top.heartbeat('/my_node')
+
+# Unregister when shutting down (optional - automatic cleanup on exit)
+ros2top.unregister_node('/my_node')
+```
+
+### Automatic Cleanup
+
+- Nodes are automatically unregistered when the process exits
+- Stale registrations are cleaned up periodically
+- Registry is stored in `~/.ros2top/registry/`
+
+### Benefits of Registration API
+
+- **Reliable**: No dependency on tracing or process matching
+- **Fast**: Instant node detection without scanning
+- **Accurate**: Direct PID mapping from the registering process
+- **Simple**: Works with any ROS2 node type (Python, C++, etc.)
