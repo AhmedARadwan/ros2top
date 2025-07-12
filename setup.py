@@ -14,6 +14,18 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(),
+    
+    # Install Python package data
+    package_data={
+        'ros2top': ['*.py'],
+    },
+    
+    # Install C++ headers and CMake files
+    data_files=[
+        ('include/ros2top', ['include/ros2top/ros2top.hpp']),
+        ('share/ros2top/cmake', ['cmake/ros2topConfig.cmake']),
+    ],
+    
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
