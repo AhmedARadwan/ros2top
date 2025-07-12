@@ -135,8 +135,24 @@ class TerminalUI:
         """Create UI components based on terminal size"""
         self.layout_manager.clear_components()
         
-        # Calculate section heights
-        system_height = max(4, height // 4)  # Quarter of the view for system info
+        # Calculate section heights with adaptive system section
+        # Calculate needed height for system section based on CPU count
+        cpu_count = psutil.cpu_count() or 1
+        cpu_display_width = 19  # "C00[████████░] 75.2% "
+        cpus_per_row = max(1, (width - 1) // cpu_display_width)
+        cpu_rows_needed = (cpu_count + cpus_per_row - 1) // cpus_per_row  # Ceiling division
+        
+        # System section needs: CPU rows + RAM row + GPU rows (if available) + padding
+        min_system_height = cpu_rows_needed + 1  # CPU rows + RAM
+        if self.monitor.is_gpu_available():
+            min_system_height += self.monitor.get_gpu_count() * 2  # GPU util + GPU mem per GPU
+        min_system_height += 1  # Extra padding
+        
+        # Use the larger of minimum needed or quarter of terminal height
+        system_height = max(min_system_height, height // 4)
+        # But cap it to not take more than half the terminal
+        system_height = min(system_height, height // 2)
+        
         controls_height = 2  # Last two lines for shortcuts
         table_height = height - system_height - controls_height  # Middle section
         
@@ -256,17 +272,22 @@ class TerminalUI:
             memory = psutil.virtual_memory()
             cpu_percents = psutil.cpu_percent(percpu=True) if not self.paused else []
             
-            # Draw CPU usage - show all CPUs with usage bars
+            # Draw CPU usage - show all CPUs with usage bars, organized properly
             if cpu_percents and current_row < section['start_y'] + section['height'] - 1:
-                # Calculate how many CPUs we can fit per row
-                cpu_bar_width = 12  # Fixed width for each CPU display
-                cpus_per_row = max(1, max_width // (cpu_bar_width + 1))
+                # Calculate CPU display parameters more carefully
+                # Format: "C00[████████░] 75.2% "
+                # Each CPU takes approximately: 3 + 8 + 7 + 1 = 19 characters
+                cpu_display_width = 19
+                cpus_per_row = max(1, (max_width - 1) // cpu_display_width)
                 
+                # Display CPUs row by row
                 for i in range(0, len(cpu_percents), cpus_per_row):
                     if current_row >= section['start_y'] + section['height'] - 1:
                         break
                         
                     line = ""
+                    line_width = 0
+                    
                     for j in range(cpus_per_row):
                         cpu_idx = i + j
                         if cpu_idx >= len(cpu_percents):
@@ -274,10 +295,19 @@ class TerminalUI:
                             
                         cpu_percent = cpu_percents[cpu_idx]
                         bar = self._create_progress_bar(cpu_percent, 8)
-                        line += f"C{cpu_idx:02d}[{bar}]{cpu_percent:4.1f}% "
+                        cpu_display = f"C{cpu_idx:02d}[{bar}]{cpu_percent:4.1f}% "
+                        
+                        # Check if adding this CPU would exceed terminal width
+                        if line_width + len(cpu_display) > max_width:
+                            break
+                            
+                        line += cpu_display
+                        line_width += len(cpu_display)
                     
                     if line and current_row < section['start_y'] + section['height']:
-                        color = self._get_usage_color(max(cpu_percents[i:i+cpus_per_row]))
+                        # Get the highest CPU usage in this row for color coding
+                        row_cpu_percents = cpu_percents[i:i+j+1] if j >= 0 else cpu_percents[i:i+1]
+                        color = self._get_usage_color(max(row_cpu_percents))
                         self._addstr_with_color(current_row, 0, line.rstrip(), color)
                         current_row += 1
             
