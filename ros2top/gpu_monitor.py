@@ -37,6 +37,10 @@ class GPUMonitor:
         """Get number of available GPUs"""
         return self.device_count if self.gpu_available else 0
     
+    def get_gpu_ids(self) -> List[int]:
+        """Get list of GPU device IDs"""
+        return list(range(self.device_count)) if self.gpu_available else []
+    
     def get_gpu_usage(self, pid: int) -> Tuple[int, float, int]:
         """
         Get GPU usage for a specific process and its children
@@ -132,7 +136,13 @@ class GPUMonitor:
         try:
             handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
             
-            name = pynvml.nvmlDeviceGetName(handle).decode('utf-8')
+            # Handle both bytes and string return types from nvmlDeviceGetName
+            raw_name = pynvml.nvmlDeviceGetName(handle)
+            if isinstance(raw_name, bytes):
+                name = raw_name.decode('utf-8')
+            else:
+                name = str(raw_name)
+                
             memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
             utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
             

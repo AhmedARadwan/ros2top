@@ -107,9 +107,6 @@ def main():
     else:
         print(f"GPU monitoring enabled ({monitor.get_gpu_count()} GPU(s) detected)")
     
-    print("Starting ros2top... Press 'h' for help, 'q' to quit")
-    print()
-    
     # Run UI
     try:
         success = run_ui(monitor)

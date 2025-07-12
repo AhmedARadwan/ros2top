@@ -136,10 +136,10 @@ class TerminalUI:
         self.layout_manager.clear_components()
         
         # Calculate section heights with adaptive system section
-        # Calculate needed height for system section based on CPU count
+        # Calculate needed height for system section based on CPU count (new format)
         cpu_count = psutil.cpu_count() or 1
-        cpu_display_width = 19  # "C00[████████░] 75.2% "
-        cpus_per_row = max(1, (width - 1) // cpu_display_width)
+        cpu_display_width = 35  # " 1  [|||||||             12.3%]  " format
+        cpus_per_row = max(1, width // cpu_display_width)
         cpu_rows_needed = (cpu_count + cpus_per_row - 1) // cpus_per_row  # Ceiling division
         
         # System section needs: CPU rows + RAM row + GPU rows (if available) + padding
@@ -272,13 +272,12 @@ class TerminalUI:
             memory = psutil.virtual_memory()
             cpu_percents = psutil.cpu_percent(percpu=True) if not self.paused else []
             
-            # Draw CPU usage - show all CPUs with usage bars, organized properly
+            # Draw CPU usage with new format: " 1  [|||||||             12.3%]  2  [||||||||||||        45.6%]"
             if cpu_percents and current_row < section['start_y'] + section['height'] - 1:
-                # Calculate CPU display parameters more carefully
-                # Format: "C00[████████░] 75.2% "
-                # Each CPU takes approximately: 3 + 8 + 7 + 1 = 19 characters
-                cpu_display_width = 19
-                cpus_per_row = max(1, (max_width - 1) // cpu_display_width)
+                # Calculate CPU display parameters for new format
+                # Format: " 1  [|||||||             12.3%]  " = ~35 characters
+                cpu_display_width = 35
+                cpus_per_row = max(1, max_width // cpu_display_width)
                 
                 # Display CPUs row by row
                 for i in range(0, len(cpu_percents), cpus_per_row):
@@ -294,8 +293,8 @@ class TerminalUI:
                             break
                             
                         cpu_percent = cpu_percents[cpu_idx]
-                        bar = self._create_progress_bar(cpu_percent, 8)
-                        cpu_display = f"C{cpu_idx:02d}[{bar}]{cpu_percent:4.1f}% "
+                        bar = self._create_progress_bar_new_style(cpu_percent, 20)
+                        cpu_display = f"{cpu_idx + 1:2}  [{bar}{cpu_percent:5.1f}%]  "
                         
                         # Check if adding this CPU would exceed terminal width
                         if line_width + len(cpu_display) > max_width:
@@ -311,17 +310,20 @@ class TerminalUI:
                         self._addstr_with_color(current_row, 0, line.rstrip(), color)
                         current_row += 1
             
-            # Draw RAM usage
+            # Draw RAM usage with new format: "  Mem[||||||||||    3.20G/  8.00G]"
             if current_row < section['start_y'] + section['height']:
                 mem_percent = memory.percent
-                mem_bar = self._create_progress_bar(mem_percent, 20)
                 mem_gb_used = memory.used / (1024**3)
                 mem_gb_total = memory.total / (1024**3)
-                mem_line = f"RAM[{mem_bar}] {mem_gb_used:.1f}G/{mem_gb_total:.1f}G ({mem_percent:.1f}%)"
+                
+                # Create properly aligned memory display
+                mem_text = f"{mem_gb_used:5.2f}G/{mem_gb_total:6.2f}G"
+                mem_bar_display = self._create_aligned_bar_with_text(mem_percent, mem_text, 30)
+                mem_line = f"  Mem{mem_bar_display}"
                 self._addstr_with_color(current_row, 0, mem_line, self._get_usage_color(mem_percent))
                 current_row += 1
             
-            # Draw GPU usage and GPU RAM usage
+            # Draw GPU usage and GPU RAM usage with new format
             if self.monitor.is_gpu_available() and current_row < section['start_y'] + section['height']:
                 for gpu_id in range(self.monitor.get_gpu_count()):
                     if current_row >= section['start_y'] + section['height']:
@@ -334,16 +336,19 @@ class TerminalUI:
                         gpu_mem_total = gpu_info['memory_total_mb']
                         gpu_mem_percent = (gpu_mem_used / gpu_mem_total) * 100 if gpu_mem_total > 0 else 0
                         
-                        # GPU utilization line
-                        gpu_bar = self._create_progress_bar(gpu_util, 15)
-                        gpu_line = f"GPU{gpu_id}[{gpu_bar}] {gpu_util:.1f}%"
+                        # GPU utilization line: "   GPU [|||||||             12.3%]"
+                        gpu_util_text = f"{gpu_util:5.1f}%"
+                        gpu_bar_display = self._create_aligned_bar_with_text(gpu_util, gpu_util_text, 30)
+                        gpu_line = f"   GPU{gpu_bar_display}"
                         self._addstr_with_color(current_row, 0, gpu_line, self._get_usage_color(gpu_util))
                         current_row += 1
                         
-                        # GPU memory line
+                        # GPU memory line: " GMEM[|                 512M/  2.00G]"
                         if current_row < section['start_y'] + section['height']:
-                            gpu_mem_bar = self._create_progress_bar(gpu_mem_percent, 15)
-                            gpu_mem_line = f"GMEM[{gpu_mem_bar}] {gpu_mem_used:.0f}M/{gpu_mem_total:.0f}M ({gpu_mem_percent:.1f}%)"
+                            gpu_mem_gb = gpu_mem_total / 1024  # Convert MB to GB
+                            gpu_mem_text = f"{gpu_mem_used:6.0f}M/{gpu_mem_gb:6.2f}G"
+                            gpu_mem_bar_display = self._create_aligned_bar_with_text(gpu_mem_percent, gpu_mem_text, 30)
+                            gpu_mem_line = f" GMEM{gpu_mem_bar_display}"
                             self._addstr_with_color(current_row, 0, gpu_mem_line, self._get_usage_color(gpu_mem_percent))
                             current_row += 1
                 
@@ -373,10 +378,40 @@ class TerminalUI:
             pass
     
     def _create_progress_bar(self, percent: float, width: int = 10) -> str:
-        """Create a progress bar string"""
+        """Create a progress bar string (legacy format)"""
         filled = int((percent / 100.0) * width)
         bar = "█" * filled + "░" * (width - filled)
         return bar
+    
+    def _create_progress_bar_new_style(self, percent: float, width: int = 20) -> str:
+        """Create a progress bar string in new style with pipes and spaces"""
+        filled = int((percent / 100.0) * width)
+        bar = "|" * filled + " " * (width - filled)
+        return bar
+    
+    def _create_aligned_bar_with_text(self, percent: float, text: str, total_width: int = 30) -> str:
+        """Create a progress bar with right-aligned text within brackets"""
+        # Calculate bar width (total width minus text length minus brackets)
+        text_len = len(text)
+        bar_width = total_width - text_len - 2  # -2 for brackets []
+        
+        if bar_width < 1:
+            bar_width = 1
+            
+        filled = int((percent / 100.0) * bar_width)
+        empty = bar_width - filled
+        
+        # Adjust empty space to accommodate text
+        if empty >= text_len:
+            # Text fits in empty space
+            bar = "|" * filled + " " * (empty - text_len) + text
+        else:
+            # Text doesn't fit, reduce bar
+            available_bar = max(1, bar_width - text_len)
+            filled = min(filled, available_bar)
+            bar = "|" * filled + " " * (bar_width - filled - text_len) + text
+            
+        return f"[{bar}]"
     
     def _get_usage_color(self, percent: float) -> int:
         """Get color based on usage percentage"""
