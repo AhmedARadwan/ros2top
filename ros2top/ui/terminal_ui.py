@@ -293,7 +293,7 @@ class TerminalUI:
                             break
                             
                         cpu_percent = cpu_percents[cpu_idx]
-                        bar = self._create_progress_bar_new_style(cpu_percent, 20)
+                        bar = self._create_progress_bar(cpu_percent, 20)
                         cpu_display = f"{cpu_idx + 1:2}  [{bar}{cpu_percent:5.1f}%]  "
                         
                         # Check if adding this CPU would exceed terminal width
@@ -377,13 +377,7 @@ class TerminalUI:
         except curses.error:
             pass
     
-    def _create_progress_bar(self, percent: float, width: int = 10) -> str:
-        """Create a progress bar string (legacy format)"""
-        filled = int((percent / 100.0) * width)
-        bar = "█" * filled + "░" * (width - filled)
-        return bar
-    
-    def _create_progress_bar_new_style(self, percent: float, width: int = 20) -> str:
+    def _create_progress_bar(self, percent: float, width: int = 20) -> str:
         """Create a progress bar string in new style with pipes and spaces"""
         filled = int((percent / 100.0) * width)
         bar = "|" * filled + " " * (width - filled)
