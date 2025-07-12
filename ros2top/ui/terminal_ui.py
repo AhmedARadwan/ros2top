@@ -318,8 +318,8 @@ class TerminalUI:
                 
                 # Create properly aligned memory display
                 mem_text = f"{mem_gb_used:5.2f}G/{mem_gb_total:6.2f}G"
-                mem_bar_display = self._create_aligned_bar_with_text(mem_percent, mem_text, 30)
-                mem_line = f"  Mem{mem_bar_display}"
+                mem_bar_display = self._create_aligned_bar_with_text(mem_percent, mem_text, 50)
+                mem_line = f"RAM {mem_bar_display}"
                 self._addstr_with_color(current_row, 0, mem_line, self._get_usage_color(mem_percent))
                 current_row += 1
             
@@ -338,17 +338,17 @@ class TerminalUI:
                         
                         # GPU utilization line: "   GPU [|||||||             12.3%]"
                         gpu_util_text = f"{gpu_util:5.1f}%"
-                        gpu_bar_display = self._create_aligned_bar_with_text(gpu_util, gpu_util_text, 30)
-                        gpu_line = f"   GPU{gpu_bar_display}"
+                        gpu_bar_display = self._create_aligned_bar_with_text(gpu_util, gpu_util_text, 50)
+                        gpu_line = f"GPU {gpu_bar_display}"
                         self._addstr_with_color(current_row, 0, gpu_line, self._get_usage_color(gpu_util))
                         current_row += 1
-                        
-                        # GPU memory line: " GMEM[|                 512M/  2.00G]"
+
+                        # GPU memory line: "GMEM[|                 512M/  2.00G]"
                         if current_row < section['start_y'] + section['height']:
                             gpu_mem_gb = gpu_mem_total / 1024  # Convert MB to GB
                             gpu_mem_text = f"{gpu_mem_used:6.0f}M/{gpu_mem_gb:6.2f}G"
-                            gpu_mem_bar_display = self._create_aligned_bar_with_text(gpu_mem_percent, gpu_mem_text, 30)
-                            gpu_mem_line = f" GMEM{gpu_mem_bar_display}"
+                            gpu_mem_bar_display = self._create_aligned_bar_with_text(gpu_mem_percent, gpu_mem_text, 50)
+                            gpu_mem_line = f"GMEM{gpu_mem_bar_display}"
                             self._addstr_with_color(current_row, 0, gpu_mem_line, self._get_usage_color(gpu_mem_percent))
                             current_row += 1
                 
