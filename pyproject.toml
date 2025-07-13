@@ -5,24 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ros2top"
 dynamic = ["version"]
-description = "A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage"
+description = "A real-time process monitor with support for ROS2 nodes, showing CPU, RAM, and GPU usage"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 authors = [
     {name = "Ahmed Radwan", email = "ahmed.ali.radwan94@gmail.com"},
 ]
-keywords = ["ros2", "monitoring", "gpu", "cpu", "memory", "nodes"]
+keywords = ["monitoring", "process", "ros2", "gpu", "cpu", "memory", "nodes", "system"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [

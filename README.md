@@ -13,7 +13,6 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 - 🖥️ **Terminal-based interface** using curses
 - 🔄 **Auto-refresh** with configurable intervals
 - 🏷️ **Process tree awareness** (includes child processes)
-- 🕵️ **Advanced node detection** using ROS2 tracing for reliable C++ node discovery
 - 🧵 **Background tracing** on separate thread for responsive UI
 - 📝 **Node registration API** for reliable node-to-monitor communication
 
