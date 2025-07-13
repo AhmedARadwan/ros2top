@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,28 +10,27 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 authors = [
-    {name = "Ahmed Radwan", email = "ahmed.ali.radwan94@gmail.com"},
+  { name = "Ahmed Radwan", email = "ahmed.ali.radwan94@gmail.com" },
 ]
 keywords = ["monitoring", "process", "ros2", "gpu", "cpu", "memory", "nodes", "system"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: System :: Monitoring",
-    "Topic :: System :: Systems Administration",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Monitoring",
+  "Topic :: System :: Systems Administration",
+  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "psutil>=5.8.0",
-    "pynvml>=11.0.0",
+  "psutil>=5.8.0",
+  "pynvml>=11.0.0",
 ]
 
 [project.scripts]
@@ -40,18 +39,16 @@ ros2top = "ros2top.main:main"
 [project.urls]
 Homepage = "https://github.com/AhmedARadwan/ros2top"
 "Bug Reports" = "https://github.com/AhmedARadwan/ros2top/issues"
-"Source" = "https://github.com/AhmedARadwan/ros2top"
+Source = "https://github.com/AhmedARadwan/ros2top"
 
 [tool.setuptools.dynamic]
-version = {attr = "ros2top.__version__"}
+version = { attr = "ros2top.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["ros2top*"]
 exclude = ["cmake*", "include*", "tests*", "build*"]
 
-[tool.setuptools.package-data]
-ros2top = ["*.py"]
-
+# Data-file declarations (optional): include headers and cmake scripts
 [tool.setuptools.data-files]
 "include/ros2top" = ["include/ros2top/*.hpp"]
 "share/ros2top/cmake" = ["cmake/*.cmake"]
