@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Ahmed Radwan", email = "ahmed.ali.radwan94@gmail.com"},
 ]
@@ -16,7 +16,6 @@ keywords = ["ros2", "monitoring", "gpu", "cpu", "memory", "nodes"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -41,3 +40,14 @@ Homepage = "https://github.com/AhmedARadwan/ros2top"
 
 [tool.setuptools.dynamic]
 version = {attr = "ros2top.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["ros2top*"]
+exclude = ["cmake*", "include*", "tests*", "build*"]
+
+[tool.setuptools.package-data]
+ros2top = ["*.py"]
+
+[tool.setuptools.data-files]
+"include/ros2top" = ["include/ros2top/*.hpp"]
+"share/ros2top/cmake" = ["cmake/*.cmake"]
