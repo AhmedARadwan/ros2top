@@ -36,7 +36,6 @@ pip install -e .
 ## Requirements
 
 - Python 3.8+
-- ROS2 (any distribution)
 - NVIDIA drivers (for GPU monitoring)
 
 ### Python Dependencies
@@ -44,14 +43,15 @@ pip install -e .
 - `psutil>=5.8.0`
 - `pynvml>=11.0.0`
 
+### CPP Dependencies
+
+- [nlohmann json](https://github.com/nlohmann/json) installed from source.
+
 ## Usage
 
 ### Basic Usage
 
 ```bash
-# Make sure ROS2 is sourced
-source /opt/ros/humble/setup.bash  # or your ROS2 distro
-
 # Run ros2top
 ros2top
 ```

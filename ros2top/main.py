@@ -15,16 +15,15 @@ def create_argument_parser():
     description='Real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage',
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
-            Examples:
-            ros2top                    # Run with default settings
-            ros2top --refresh 2        # Refresh every 2 seconds
-            ros2top --no-gpu          # Disable GPU monitoring
+Examples:
+    ros2top                    # Run with default settings
+    ros2top --refresh 2        # Refresh every 2 seconds
 
-            Controls:
-            q/Q - Quit
-            r/R - Force refresh node list
-            h/H - Show help
-        """
+    Controls:
+    q/Q - Quit
+    r/R - Force refresh node list
+    h/H - Show help
+    """
     )
     
     parser.add_argument(
@@ -32,12 +31,6 @@ def create_argument_parser():
         type=float,
         default=0.1,
         help='Node refresh interval in seconds (default: 0.1)'
-    )
-    
-    parser.add_argument(
-        '--no-gpu',
-        action='store_true',
-        help='Disable GPU monitoring'
     )
     
     parser.add_argument(
@@ -98,14 +91,6 @@ def main():
         print("ros2top will exit.")
         print()
         sys.exit(0)
-    
-    # Show GPU status
-    if args.no_gpu:
-        print("GPU monitoring disabled by user")
-    elif not monitor.is_gpu_available():
-        print("GPU monitoring not available (NVIDIA drivers/pynvml not found)")
-    else:
-        print(f"GPU monitoring enabled ({monitor.get_gpu_count()} GPU(s) detected)")
     
     # Run UI
     try:
