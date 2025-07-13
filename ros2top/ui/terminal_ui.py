@@ -176,7 +176,7 @@ class TerminalUI:
         }
         
         # Create table component for middle section
-        headers = ["PID", "Uptime", "%CPU", "RAM(MB)", "GPU#", "%GPU", "GMEM(MB)", "Command"]
+        headers = ["PID", "Uptime", "%CPU", "RAM(MB)", "GPU#", "%GPU", "GMEM(MB)", "Node Name"]
         self.nodes_table = Table(
             Rect(0, self.table_section['start_y'], width, table_height),
             headers
@@ -444,32 +444,25 @@ class TerminalUI:
             
         nodes = self.monitor.get_node_info_list()
         
-        # Calculate available width for command column
+        # Calculate available width for node name column
         # Fixed widths for other columns: PID(7), Uptime(8), %CPU(6), RAM(MB)(8), GPU#(4), %GPU(6), GMEM(MB)(9)
         fixed_columns_width = 7 + 8 + 6 + 8 + 4 + 6 + 9  # Total: 48 chars
         separators_width = 7  # 7 separators between 8 columns
         available_width = self.table_section['width'] if hasattr(self, 'table_section') and self.table_section else 80
-        command_width = max(20, available_width - fixed_columns_width - separators_width)
+        node_name_width = max(20, available_width - fixed_columns_width - separators_width)
         
         # Convert to table rows with specified columns:
-        # PID, Uptime, %CPU, RAM(MB), GPU#, %GPU, GMEM(MB), Command
+        # PID, Uptime, %CPU, RAM(MB), GPU#, %GPU, GMEM(MB), Node Name
         rows = []
         for node in nodes:
             # Calculate uptime (simplified - could be enhanced)
             uptime = "running"  # Placeholder - could calculate from process start time
             
-            # Get process command - use full available width
-            command = "unknown"
-            try:
-                proc = psutil.Process(node.pid)
-                cmd_line = proc.cmdline()
-                if cmd_line:
-                    command = ' '.join(cmd_line)  # Full command line
-                    # Truncate to available width
-                    if len(command) > command_width:
-                        command = command[:command_width - 3] + "..."
-            except (psutil.Error, AttributeError):
-                command = "unknown"
+            # Get node name - use full available width
+            node_name = node.name if node.name else "unknown"
+            # Truncate to available width
+            if len(node_name) > node_name_width:
+                node_name = node_name[:node_name_width - 3] + "..."
             
             row = [
                 str(node.pid),                    # PID
@@ -488,7 +481,7 @@ class TerminalUI:
             else:
                 row.extend(["--", "--", "--"])
             
-            row.append(command)                   # Command
+            row.append(node_name)                # Node Name
             
             rows.append(row)
         
