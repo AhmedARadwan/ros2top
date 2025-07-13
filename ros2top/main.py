@@ -5,6 +5,7 @@ Main entry point for ros2top
 
 import sys
 import argparse
+from . import __version__
 from .node_monitor import NodeMonitor
 from .ui.terminal_ui import run_ui, show_error_message
 
@@ -36,7 +37,7 @@ Examples:
     parser.add_argument(
         '--version', '-v',
         action='version',
-        version='%(prog)s 0.1.0'
+        version=f'%(prog)s {__version__}'
     )
     
     return parser

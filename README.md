@@ -13,7 +13,6 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 - 🖥️ **Terminal-based interface** using curses
 - 🔄 **Auto-refresh** with configurable intervals
 - 🏷️ **Process tree awareness** (includes child processes)
-- 🧵 **Background tracing** on separate thread for responsive UI
 - 📝 **Node registration API** for reliable node-to-monitor communication
 
 ## Installation
@@ -65,7 +64,6 @@ ros2top
 ```bash
 ros2top --help                # Show help
 ros2top --refresh 2          # Refresh every 2 seconds (default: 5)
-ros2top --no-gpu            # Disable GPU monitoring
 ros2top --version           # Show version
 ```
 
@@ -86,15 +84,7 @@ The enhanced terminal UI provides responsive and interactive controls:
 | `Space`    | Force immediate update        |
 | `Home/End` | Jump to first/last node       |
 
-## Enhanced Terminal UI
-
-The ros2top interface now features a **responsive, adaptive design** that automatically adjusts to your terminal size:
-
-### Responsive Layout
-
-- **Small terminals (< 80 cols)**: Essential info only
-- **Medium terminals (80-120 cols)**: Full monitoring with detailed CPU
-- **Large terminals (> 120 cols)**: Extended view with additional columns
+## Terminal UI
 
 ### Visual Features
 
@@ -132,12 +122,6 @@ The top panel shows real-time system information:
 ros2top --refresh 2
 ```
 
-### Run without GPU monitoring
-
-```bash
-ros2top --no-gpu
-```
-
 ## How It Works
 
 1. **Node Registartion**: Every node registers its name and PID at startup with ros2top.
@@ -150,7 +134,6 @@ ros2top --no-gpu
 
 - Install NVIDIA drivers
 - Install pynvml: `pip install pynvml`
-- Use `--no-gpu` flag to disable GPU monitoring
 
 ### Nodes not showing up
 
@@ -166,7 +149,6 @@ ros2top --no-gpu
 git clone https://github.com/AhmedARadwan/ros2top.git
 cd ros2top
 pip install -e .
-pip install -r requirements.txt
 ```
 
 ### Running Tests
@@ -185,17 +167,38 @@ mypy ros2top/
 
 ## Architecture
 
-```
+```text
 ros2top/
-├── ros2top/
-│   ├── main.py          # CLI entry point
-│   ├── node_monitor.py  # Core monitoring logic
-│   ├── gpu_monitor.py   # GPU monitoring
-│   ├── terminal_ui.py   # Curses interface
-│   ├── node_registry.py # Node registration system
-│   └── ros2_utils.py    # Simplified ROS2 utilities
-├── setup.py             # Package setup
-└── README.md           # This file
+├── ros2top/                 # Python package
+│   ├── __init__.py         # Package initialization and public API
+│   ├── main.py             # CLI entry point
+│   ├── node_monitor.py     # Core monitoring logic
+│   ├── node_registry.py    # Node registration system
+│   ├── gpu_monitor.py      # GPU monitoring
+│   ├── ros2_utils.py       # ROS2 utilities
+│   └── ui/                 # User interface components
+│       ├── __init__.py
+│       ├── terminal_ui.py  # Main curses interface
+│       ├── components.py   # UI components
+│       └── layout.py       # UI layout management
+├── include/                # C++ headers
+│   └── ros2top/
+│       └── ros2top.hpp     # C++ API for node registration
+├── examples/               # Example integrations
+│   ├── python/             # Python examples
+│   │   ├── README.md
+│   │   └── example_node.py
+│   └── cpp/                # C++ examples
+│       ├── README.md
+│       └── example_monitored_node/  # Complete ROS2 package
+├── tests/                  # Test suite
+│   ├── __init__.py
+│   └── test_ros2top.py
+├── cmake/                  # CMake configuration
+├── pyproject.toml          # Python build configuration
+├── requirements.txt        # Python dependencies
+├── LICENSE                 # MIT license
+└── README.md              # This file
 ```
 
 ## Contributing
@@ -212,13 +215,22 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Changelog
 
+### v0.1.2
+
+- Enhance README
+
+### v0.1.1
+
+- Add example usage
+- Enhance README
+
 ### v0.1.0
 
 - Initial release
 - Basic node monitoring with CPU, RAM, GPU usage
 - Terminal interface with curses
 - Command line options
-- ROS2 node discovery and process mapping
+- Node registration and process mapping
 
 ## Similar Tools
 
@@ -272,42 +284,6 @@ ros2top.register_node('/camera_processor', {
 # In your main loop, send heartbeats every few seconds
 ros2top.heartbeat('/camera_processor')
 ```
-
-### Example: Multiple Nodes in One Process
-
-```python
-import ros2top
-import time
-
-def main():
-    # Register multiple nodes running in this process
-    ros2top.register_node('/human_tracker', {'type': 'detector'})
-    ros2top.register_node('/video_publisher', {'type': 'publisher'})
-
-    try:
-        while True:
-            # Your processing logic here
-            do_object_detection()
-
-            # Send heartbeats every 5 seconds
-            ros2top.heartbeat('/human_tracker')
-            ros2top.heartbeat('/video_publisher')
-
-            time.sleep(5)
-
-    finally:
-        # Cleanup (optional - happens automatically on exit)
-        ros2top.unregister_node('/human_tracker')
-        ros2top.unregister_node('/video_publisher')
-```
-
-### Benefits of Registration
-
-- **Guaranteed detection**: Registered nodes will always be detected by `ros2top`
-- **Immediate visibility**: No waiting for tracing or process scanning
-- **Rich metadata**: Include custom information about your nodes
-- **Multi-process support**: Perfect for complex applications
-- **Heartbeat monitoring**: Detect unresponsive nodes even if process is running
 
 ## Node Detection
 
