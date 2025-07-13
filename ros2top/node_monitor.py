@@ -6,13 +6,13 @@ Core node monitoring functionality
 import time
 import psutil
 from typing import Dict, List, Optional, NamedTuple, Tuple
-from .ros2_utils import (get_ros2_nodes, get_node_pid, is_ros2_available, 
-                       get_ros2_nodes_with_pids, start_background_tracing, stop_background_tracing)
+from .ros2_utils import is_ros2_available, get_ros2_nodes_with_pids, check_ros2_environment
 from .gpu_monitor import GPUMonitor
+from .node_registry import get_registered_nodes, get_registered_node_info
 
 
 class NodeInfo(NamedTuple):
-    """Information about a ROS2 node"""
+    """Information about a monitored process/node"""
     name: str
     pid: int
     cpu_percent: float
@@ -20,10 +20,11 @@ class NodeInfo(NamedTuple):
     gpu_memory_mb: int
     gpu_utilization: float
     gpu_device_id: int
+    start_time: float  # Unix timestamp
 
 
 class NodeMonitor:
-    """Monitor ROS2 nodes and their resource usage"""
+    """Monitor registered processes and their resource usage (supports both ROS2 nodes and generic processes)"""
     
     def __init__(self, refresh_interval: float = 5.0):
         self.refresh_interval = refresh_interval
@@ -34,14 +35,10 @@ class NodeMonitor:
         
         # Check ROS2 availability
         self.ros2_available = is_ros2_available()
-        
-        # Start background tracing if ROS2 is available
-        if self.ros2_available:
-            start_background_tracing()
     
     def cleanup(self):
-        """Cleanup resources including background tracing"""
-        stop_background_tracing()
+        """Cleanup resources"""
+        pass
         
     def is_ros2_available(self) -> bool:
         """Check if ROS2 is available"""
@@ -57,7 +54,7 @@ class NodeMonitor:
     
     def update_nodes(self) -> bool:
         """
-        Update the list of monitored nodes
+        Update the list of monitored nodes and processes
         
         Returns:
             True if nodes were updated, False otherwise
@@ -67,23 +64,45 @@ class NodeMonitor:
         if current_time - self.last_refresh < self.refresh_interval:
             return False
             
-        if not self.ros2_available:
-            return False
-            
         try:
-            # Use the new tracing-based approach
-            nodes_with_pids = get_ros2_nodes_with_pids()
+            # Get all processes to monitor (ROS2 nodes + registered processes)
+            all_processes = self._get_all_processes_to_monitor()
             
             # Update processes based on discovered nodes
-            current_nodes = [node for node, pid in nodes_with_pids]
-            self._remove_dead_nodes(current_nodes)
-            self._add_new_nodes_with_pids(nodes_with_pids)
+            current_names = [name for name, pid in all_processes]
+            self._remove_dead_nodes(current_names)
+            self._add_new_nodes_with_pids(all_processes)
             
             self.last_refresh = current_time
             return True
             
         except Exception:
             return False
+    
+    def _get_all_processes_to_monitor(self) -> List[Tuple[str, int]]:
+        """Get all processes to monitor (primarily from registry, optionally including ROS2 nodes)"""
+        all_processes = []
+        
+        # Primary source: registered processes
+        try:
+            registered_nodes = get_registered_nodes()
+            all_processes.extend(registered_nodes)
+        except Exception:
+            pass
+        
+        # Secondary source: ROS2 nodes (if available and not already in registry)
+        if self.ros2_available:
+            try:
+                ros2_nodes = get_ros2_nodes_with_pids()
+                # Only add ROS2 nodes that aren't already registered
+                registered_names = {name for name, pid in all_processes}
+                for name, pid in ros2_nodes:
+                    if name not in registered_names:
+                        all_processes.append((name, pid))
+            except Exception:
+                pass
+            
+        return all_processes
     
     def _remove_dead_nodes(self, current_nodes: List[str]):
         """Remove processes for nodes that no longer exist"""
@@ -135,6 +154,9 @@ class NodeMonitor:
                 memory_info = process.memory_info()
                 ram_mb = memory_info.rss / (1024 * 1024)  # Resident Set Size in MB
                 
+                # Get process start time - prefer registry registration time
+                start_time = self._get_process_start_time(node_name, process)
+                
                 # Get GPU usage
                 gpu_mem, gpu_util, gpu_id = self.gpu_monitor.get_gpu_usage(process.pid)
                 
@@ -145,7 +167,8 @@ class NodeMonitor:
                     ram_mb=ram_mb,
                     gpu_memory_mb=gpu_mem,
                     gpu_utilization=gpu_util,
-                    gpu_device_id=gpu_id
+                    gpu_device_id=gpu_id,
+                    start_time=start_time
                 )
                 
                 node_infos.append(node_info)
@@ -158,6 +181,23 @@ class NodeMonitor:
                 continue
         
         return node_infos
+    
+    def _get_process_start_time(self, node_name: str, process: psutil.Process) -> float:
+        """Get process start time, preferring registry registration time"""
+        try:
+            # First try to get registration time from registry
+            registry_info = get_registered_node_info(node_name)
+            if registry_info and 'registration_time' in registry_info:
+                return registry_info['registration_time']
+        except Exception:
+            pass
+        
+        # Fall back to psutil create_time
+        try:
+            return process.create_time()
+        except Exception:
+            # If all else fails, use current time
+            return time.time()
     
     def get_nodes_count(self) -> int:
         """Get number of monitored nodes"""
@@ -174,16 +214,18 @@ class NodeMonitor:
     
     def get_system_info(self) -> Dict[str, str]:
         """Get system information"""
-        from .ros2_utils import check_ros2_environment
-        
         info = {
             'CPU Cores': str(self.cores),
             'GPU Count': str(self.get_gpu_count()),
             'Monitored Nodes': str(self.get_nodes_count()),
         }
         
-        # Add ROS2 environment info
-        ros2_env = check_ros2_environment()
-        info.update(ros2_env)
+        # Add ROS2 environment info if available
+        try:
+            ros2_env = check_ros2_environment()
+            info.update(ros2_env)
+        except Exception:
+            # If ROS2 environment check fails, just skip it
+            info['ROS2 Available'] = str(self.ros2_available)
         
         return info

@@ -10,6 +10,7 @@ import os
 import json
 import time
 import atexit
+import shutil
 import psutil
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
@@ -241,11 +242,8 @@ def get_registry_info() -> Dict[str, str]:
 
 
 # Internal helper functions
-
 def _write_node_registration(node_data: Dict) -> bool:
     """Write node registration to file with file locking"""
-    import tempfile
-    import shutil
     
     try:
         _ensure_registry_dir()

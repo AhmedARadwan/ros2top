@@ -78,14 +78,3 @@ def check_ros2_environment() -> Dict[str, str]:
     env_info['ros2_available'] = str(is_ros2_available())
     
     return env_info
-
-
-# Compatibility functions for existing code
-def start_background_tracing():
-    """Compatibility function - no longer needed with registry approach"""
-    pass
-
-
-def stop_background_tracing():
-    """Compatibility function - no longer needed with registry approach"""
-    pass

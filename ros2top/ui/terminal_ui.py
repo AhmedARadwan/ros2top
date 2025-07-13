@@ -216,6 +216,38 @@ class TerminalUI:
             
         return headers
     
+    def _format_uptime(self, start_time: float) -> str:
+        """
+        Format uptime from process start time
+        
+        Args:
+            start_time: Unix timestamp of process start
+            
+        Returns:
+            Formatted uptime string in DDd:HHh:MMm:SSs format
+        """
+        try:
+            current_time = time.time()
+            uptime_seconds = int(current_time - start_time)
+            
+            # Calculate components
+            days = uptime_seconds // 86400
+            hours = (uptime_seconds % 86400) // 3600
+            minutes = (uptime_seconds % 3600) // 60
+            seconds = uptime_seconds % 60
+            
+            # Format based on duration
+            if days > 0:
+                return f"{days:02d}d:{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
+            elif hours > 0:
+                return f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
+            elif minutes > 0:
+                return f"{minutes:02d}m:{seconds:02d}s"
+            else:
+                return f"{seconds:02d}s"
+        except (ValueError, TypeError, OSError):
+            return "unknown"
+    
     def _update_ui(self):
         """Update UI components with current data"""
         current_time = time.time()
@@ -455,8 +487,8 @@ class TerminalUI:
         # PID, Uptime, %CPU, RAM(MB), GPU#, %GPU, GMEM(MB), Node Name
         rows = []
         for node in nodes:
-            # Calculate uptime (simplified - could be enhanced)
-            uptime = "running"  # Placeholder - could calculate from process start time
+            # Calculate uptime using the new formatting function
+            uptime = self._format_uptime(node.start_time)
             
             # Get node name - use full available width
             node_name = node.name if node.name else "unknown"
