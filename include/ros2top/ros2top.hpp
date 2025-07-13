@@ -11,52 +11,11 @@
 #include <thread>
 #include <chrono>
 #include <iostream>
+#include <nlohmann/json.hpp>
 
 namespace ros2top {
 
-/**
- * @brief JSON utility class for simple JSON operations without external dependencies
- */
-class SimpleJSON {
-private:
-    std::map<std::string, std::string> data_;
-    
-public:
-    void set(const std::string& key, const std::string& value) {
-        data_[key] = value;
-    }
-    
-    void set(const std::string& key, int value) {
-        data_[key] = std::to_string(value);
-    }
-    
-    void set(const std::string& key, long value) {
-        data_[key] = std::to_string(value);
-    }
-    
-    std::string serialize() const {
-        std::string json = "{\n";
-        bool first = true;
-        for (const auto& [key, value] : data_) {
-            if (!first) json += ",\n";
-            json += "  \"" + key + "\": ";
-            
-            // Check if value is numeric
-            bool is_numeric = !value.empty() && 
-                             (std::isdigit(value[0]) || 
-                              (value[0] == '-' && value.size() > 1 && std::isdigit(value[1])));
-            
-            if (is_numeric) {
-                json += value;
-            } else {
-                json += "\"" + value + "\"";
-            }
-            first = false;
-        }
-        json += "\n}";
-        return json;
-    }
-};
+using json = nlohmann::json;
 
 /**
  * @brief File locking utility for safe concurrent access to registry
@@ -127,31 +86,40 @@ private:
         return (node_name.length() > 0 && node_name[0] == '/') ? node_name : "/" + node_name;
     }
     
-    static std::string read_registry_content() {
+    static json read_registry_json() {
         std::string registry_file = get_registry_file();
         if (!std::filesystem::exists(registry_file)) {
-            return "{}";
+            return json::object();
         }
         
         std::ifstream file(registry_file);
         if (!file.is_open()) {
-            return "{}";
+            return json::object();
         }
         
-        std::string content((std::istreambuf_iterator<char>(file)),
-                           std::istreambuf_iterator<char>());
-        return content.empty() ? "{}" : content;
+        try {
+            json j;
+            file >> j;
+            return j;
+        } catch (const json::exception&) {
+            // If JSON is corrupted, return empty object
+            return json::object();
+        }
     }
     
-    static bool write_registry_content(const std::string& content) {
+    static bool write_registry_json(const json& j) {
         std::string registry_file = get_registry_file();
         std::ofstream file(registry_file);
         if (!file.is_open()) {
             return false;
         }
         
-        file << content;
-        return file.good();
+        try {
+            file << j.dump(2) << std::endl;
+            return file.good();
+        } catch (const json::exception&) {
+            return false;
+        }
     }
     
     static std::string get_process_name() {
@@ -194,39 +162,36 @@ public:
                 return false;
             }
             
-            // Create node registration data
-            SimpleJSON node_data;
-            node_data.set("node_name", normalize_node_name(node_name));
-            node_data.set("pid", static_cast<int>(getpid()));
-            node_data.set("timestamp", static_cast<long>(std::time(nullptr)));
-            node_data.set("language", "cpp");
-            node_data.set("process_name", get_process_name());
+            // Read existing registry
+            json registry = read_registry_json();
             
-            // Add additional info
-            for (const auto& [key, value] : additional_info) {
-                node_data.set(key, value);
-            }
+            // Normalize node name to match Python format
+            std::string normalized_name = normalize_node_name(node_name);
             
-            // Read existing registry (simplified - in real implementation would parse JSON properly)
-            std::string registry_content = read_registry_content();
+            // Create node registration data (matching Python format)
+            json node_data = {
+                {"node_name", normalized_name},
+                {"pid", getpid()},
+                {"ppid", getppid()},
+                {"process_name", get_process_name()},
+                {"cmdline", json::array()}, // Simplified for C++
+                {"registration_time", std::time(nullptr)},
+                {"last_seen", std::time(nullptr)}
+            };
             
-            // For simplicity, we'll append the new node data
-            // In a full implementation, we'd properly parse and merge JSON
-            std::string new_entry = "  \"" + normalize_node_name(node_name) + "_" + 
-                                   std::to_string(getpid()) + "\": " + node_data.serialize();
-            
-            // Simple JSON merging (this is a simplified approach)
-            if (registry_content == "{}") {
-                registry_content = "{\n" + new_entry + "\n}";
-            } else {
-                // Insert before the last }
-                size_t last_brace = registry_content.find_last_of('}');
-                if (last_brace != std::string::npos) {
-                    registry_content.insert(last_brace, ",\n" + new_entry + "\n");
+            // Add additional info if provided
+            if (!additional_info.empty()) {
+                json additional_json;
+                for (const auto& [key, value] : additional_info) {
+                    additional_json[key] = value;
                 }
+                node_data["additional_info"] = additional_json;
             }
             
-            return write_registry_content(registry_content);
+            // Use node_name as key (same as Python format)
+            registry[normalized_name] = node_data;
+            
+            return write_registry_json(registry);
             
         } catch (const std::exception& e) {
             std::cerr << "ros2top: Registration failed: " << e.what() << std::endl;
@@ -252,11 +217,16 @@ public:
                 return;
             }
             
-            // In a full implementation, we'd properly parse JSON and remove the specific entry
-            // For now, we'll just touch the file to indicate activity
-            std::string registry_file = get_registry_file();
-            if (std::filesystem::exists(registry_file)) {
-                std::filesystem::last_write_time(registry_file, std::filesystem::file_time_type::clock::now());
+            // Read existing registry
+            json registry = read_registry_json();
+            
+            // Normalize node name
+            std::string normalized_name = normalize_node_name(node_name);
+            
+            // Remove the node if it exists
+            if (registry.contains(normalized_name)) {
+                registry.erase(normalized_name);
+                write_registry_json(registry);
             }
             
         } catch (const std::exception& e) {
@@ -274,11 +244,22 @@ public:
         try {
             ensure_registry_dir();
             
-            // Simple heartbeat - update timestamp
-            // In a full implementation, this would update the specific node's timestamp
-            std::string registry_file = get_registry_file();
-            if (std::filesystem::exists(registry_file)) {
-                std::filesystem::last_write_time(registry_file, std::filesystem::file_time_type::clock::now());
+            // Acquire file lock
+            FileLock lock(get_lock_file());
+            if (!lock.try_lock()) {
+                return; // Ignore heartbeat failures - not critical
+            }
+            
+            // Read existing registry
+            json registry = read_registry_json();
+            
+            // Normalize node name
+            std::string normalized_name = normalize_node_name(node_name);
+            
+            // Update heartbeat if node exists
+            if (registry.contains(normalized_name)) {
+                registry[normalized_name]["last_seen"] = std::time(nullptr);
+                write_registry_json(registry);
             }
             
         } catch (...) {

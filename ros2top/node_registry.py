@@ -243,77 +243,204 @@ def get_registry_info() -> Dict[str, str]:
 # Internal helper functions
 
 def _write_node_registration(node_data: Dict) -> bool:
-    """Write node registration to file"""
+    """Write node registration to file with file locking"""
+    import tempfile
+    import shutil
+    
     try:
         _ensure_registry_dir()
         
-        # Read existing data
-        existing_data = {}
-        if os.path.exists(REGISTRATION_FILE):
-            with open(REGISTRATION_FILE, 'r') as f:
-                existing_data = json.load(f)
+        # Create a lock file approach compatible with C++
+        lock_acquired = False
+        max_attempts = 100  # 1 second timeout
         
-        # Update with new node data
-        existing_data[node_data['node_name']] = node_data
+        for _ in range(max_attempts):
+            try:
+                # Try to create lock file exclusively
+                with open(LOCK_FILE, 'x') as lock_file:
+                    lock_file.write(str(os.getpid()))
+                    lock_acquired = True
+                    break
+            except FileExistsError:
+                # Lock file exists, wait and retry
+                time.sleep(0.01)
+                continue
         
-        # Write back to file
-        with open(REGISTRATION_FILE, 'w') as f:
-            json.dump(existing_data, f, indent=2)
+        if not lock_acquired:
+            return False
+        
+        try:
+            # Read existing data
+            existing_data = {}
+            if os.path.exists(REGISTRATION_FILE):
+                with open(REGISTRATION_FILE, 'r') as f:
+                    try:
+                        existing_data = json.load(f)
+                    except json.JSONDecodeError:
+                        # If JSON is corrupted, start fresh
+                        existing_data = {}
             
-        return True
+            # Update with new node data
+            existing_data[node_data['node_name']] = node_data
+            
+            # Write to temporary file first, then rename (atomic operation)
+            temp_file = REGISTRATION_FILE + '.tmp'
+            with open(temp_file, 'w') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            # Atomic rename
+            shutil.move(temp_file, REGISTRATION_FILE)
+            
+            return True
+            
+        finally:
+            # Always clean up lock file
+            try:
+                os.remove(LOCK_FILE)
+            except FileNotFoundError:
+                pass
         
     except Exception:
+        # Clean up lock file on error
+        try:
+            os.remove(LOCK_FILE)
+        except FileNotFoundError:
+            pass
         return False
 
 
 
 def _remove_node_registration(node_name: str) -> bool:
-    """Remove node registration from file"""
+    """Remove node registration from file with file locking"""
+    import shutil
+    
     try:
         if not os.path.exists(REGISTRATION_FILE):
             return True
         
-        # Read existing data
-        with open(REGISTRATION_FILE, 'r') as f:
-            existing_data = json.load(f)
+        # Create a lock file approach compatible with C++
+        lock_acquired = False
+        max_attempts = 100  # 1 second timeout
         
-        # Remove the node if it exists
-        if node_name in existing_data:
-            del existing_data[node_name]
+        for _ in range(max_attempts):
+            try:
+                # Try to create lock file exclusively
+                with open(LOCK_FILE, 'x') as lock_file:
+                    lock_file.write(str(os.getpid()))
+                    lock_acquired = True
+                    break
+            except FileExistsError:
+                # Lock file exists, wait and retry
+                time.sleep(0.01)
+                continue
+        
+        if not lock_acquired:
+            return False
+        
+        try:
+            # Read existing data
+            with open(REGISTRATION_FILE, 'r') as f:
+                try:
+                    existing_data = json.load(f)
+                except json.JSONDecodeError:
+                    # If JSON is corrupted, nothing to remove
+                    return True
             
-            # Write back to file
-            with open(REGISTRATION_FILE, 'w') as f:
-                json.dump(existing_data, f, indent=2)
+            # Remove the node if it exists
+            if node_name in existing_data:
+                del existing_data[node_name]
                 
-        return True
+                # Write to temporary file first, then rename (atomic operation)
+                temp_file = REGISTRATION_FILE + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(existing_data, f, indent=2)
+                
+                # Atomic rename
+                shutil.move(temp_file, REGISTRATION_FILE)
+                
+            return True
+            
+        finally:
+            # Always clean up lock file
+            try:
+                os.remove(LOCK_FILE)
+            except FileNotFoundError:
+                pass
         
     except Exception:
+        # Clean up lock file on error
+        try:
+            os.remove(LOCK_FILE)
+        except FileNotFoundError:
+            pass
         return False
 
 
 def _update_node_heartbeat(node_name: str) -> bool:
-    """Update the last_seen timestamp for a node"""
+    """Update the last_seen timestamp for a node with file locking"""
+    import shutil
+    
     try:
         if not os.path.exists(REGISTRATION_FILE):
             return False
-            
-        # Read existing data
-        with open(REGISTRATION_FILE, 'r') as f:
-            existing_data = json.load(f)
         
-        # Update heartbeat if node exists
-        if node_name in existing_data:
-            existing_data[node_name]['last_seen'] = time.time()
+        # Create a lock file approach compatible with C++
+        lock_acquired = False
+        max_attempts = 100  # 1 second timeout
+        
+        for _ in range(max_attempts):
+            try:
+                # Try to create lock file exclusively
+                with open(LOCK_FILE, 'x') as lock_file:
+                    lock_file.write(str(os.getpid()))
+                    lock_acquired = True
+                    break
+            except FileExistsError:
+                # Lock file exists, wait and retry
+                time.sleep(0.01)
+                continue
+        
+        if not lock_acquired:
+            return False
+        
+        try:
+            # Read existing data
+            with open(REGISTRATION_FILE, 'r') as f:
+                try:
+                    existing_data = json.load(f)
+                except json.JSONDecodeError:
+                    # If JSON is corrupted, can't update
+                    return False
             
-            # Write back to file
-            with open(REGISTRATION_FILE, 'w') as f:
-                json.dump(existing_data, f, indent=2)
+            # Update heartbeat if node exists
+            if node_name in existing_data:
+                existing_data[node_name]['last_seen'] = time.time()
                 
-            return True
+                # Write to temporary file first, then rename (atomic operation)
+                temp_file = REGISTRATION_FILE + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(existing_data, f, indent=2)
+                
+                # Atomic rename
+                shutil.move(temp_file, REGISTRATION_FILE)
+                
+                return True
+                
+            return False
             
-        return False
+        finally:
+            # Always clean up lock file
+            try:
+                os.remove(LOCK_FILE)
+            except FileNotFoundError:
+                pass
         
     except Exception:
+        # Clean up lock file on error
+        try:
+            os.remove(LOCK_FILE)
+        except FileNotFoundError:
+            pass
         return False
 
 
