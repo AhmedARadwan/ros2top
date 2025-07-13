@@ -48,6 +48,11 @@ pip install -e .
 
 ## Usage
 
+### Examples
+
+- **[Python Example](examples/python/README.md)**: Complete ROS2 Python node with ros2top integration
+- **[C++ Example](examples/cpp/README.md)**: Complete ROS2 C++ package with ros2top integration
+
 ### Basic Usage
 
 ```bash
@@ -133,35 +138,13 @@ ros2top --refresh 2
 ros2top --no-gpu
 ```
 
-### Typical workflow
-
-```bash
-# Terminal 1: Start your ROS2 nodes
-ros2 launch my_package my_launch.py
-
-# Terminal 2: Monitor with ros2top
-source /opt/ros/humble/setup.bash
-ros2top
-```
-
 ## How It Works
 
-1. **Node Discovery**: Uses `ros2 node list` to find active nodes
-2. **Process Mapping**: Maps node names to system processes using `ros2 node info` and process matching
-3. **Resource Monitoring**: Uses `psutil` for CPU/RAM and `pynvml` for GPU metrics
-4. **Display**: Curses-based terminal interface for real-time updates
+1. **Node Registartion**: Every node registers its name and PID at startup with ros2top.
+2. **Resource Monitoring**: Uses `psutil` for CPU/RAM and `pynvml` for GPU metrics.
+3. **Display**: Curses-based terminal interface for real-time updates.
 
 ## Troubleshooting
-
-### "ROS2 not available" message
-
-Make sure ROS2 is properly sourced:
-
-```bash
-source /opt/ros/<your-distro>/setup.bash
-# or for workspace
-source ~/ros2_ws/install/setup.bash
-```
 
 ### No GPU monitoring
 
@@ -174,10 +157,6 @@ source ~/ros2_ws/install/setup.bash
 - Verify nodes are running: `ros2 node list`
 - Check node info: `ros2 node info /your_node`
 - Some nodes might not have detectable PIDs
-
-### Permission errors
-
-Run with appropriate permissions or adjust system settings for process monitoring.
 
 ## Development
 
