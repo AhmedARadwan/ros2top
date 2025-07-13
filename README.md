@@ -215,6 +215,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Changelog
 
+### v0.1.3
+
+- Remove dependency on ROS2 to start ros2top.
+
 ### v0.1.2
 
 - Enhance README

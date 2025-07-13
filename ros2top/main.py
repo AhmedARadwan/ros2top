@@ -81,18 +81,6 @@ def main():
         show_error_message(f"Failed to initialize node monitor: {e}")
         sys.exit(1)
     
-    # Check ROS2 availability and warn user
-    if not monitor.is_ros2_available():
-        print("Warning: ROS2 not detected in environment.")
-        print("Make sure to source your ROS2 setup before running ros2top:")
-        print("  source /opt/ros/<distro>/setup.bash")
-        print("  # or")
-        print("  source ~/ros2_ws/install/setup.bash")
-        print()
-        print("ros2top will exit.")
-        print()
-        sys.exit(0)
-    
     # Run UI
     try:
         success = run_ui(monitor)
