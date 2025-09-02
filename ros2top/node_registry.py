@@ -515,7 +515,7 @@ def _remove_node_registration_by_pid(pid: int) -> bool:
 
 def _update_node_heartbeat_by_pid(pid: int) -> bool:
     """Update the last_seen timestamp for a node by PID with file locking"""
-    import shutil
+    
     
     try:
         if not os.path.exists(REGISTRATION_FILE):
