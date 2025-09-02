@@ -448,7 +448,6 @@ def _update_node_heartbeat(node_name: str) -> bool:
 
 def _remove_node_registration_by_pid(pid: int) -> bool:
     """Remove node registration by PID from file with file locking"""
-    import shutil
     
     try:
         if not os.path.exists(REGISTRATION_FILE):
