@@ -15,6 +15,7 @@ from ros2top.ros2_utils import is_ros2_available, get_ros2_nodes, get_ros2_nodes
 from ros2top.gpu_monitor import GPUMonitor
 from ros2top.node_monitor import NodeMonitor, NodeInfo
 from ros2top.node_registry import register_node, unregister_node, get_registered_nodes
+import psutil
 
 
 class TestROS2Utils(unittest.TestCase):
@@ -278,6 +279,89 @@ class TestRegistryStartTime(unittest.TestCase):
         # Should use psutil time as fallback
         self.assertEqual(start_time, psutil_start_time)
         mock_proc.create_time.assert_called_once()
+
+
+class TestKillProcess(unittest.TestCase):
+    """Test kill process functionality"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.monitor = NodeMonitor()
+    
+    @patch('psutil.Process')
+    def test_kill_process_success(self, mock_process_class):
+        """Test successful process termination"""
+        # Mock a process
+        mock_proc = MagicMock()
+        mock_proc.terminate.return_value = None
+        mock_proc.wait.return_value = None
+        mock_process_class.return_value = mock_proc
+        
+        # Add process to monitor
+        self.monitor.processes["/test_node"] = mock_proc
+        
+        # Test kill
+        result = self.monitor.kill_process("/test_node", force=False)
+        
+        self.assertTrue(result)
+        mock_proc.terminate.assert_called_once()
+        mock_proc.wait.assert_called_once_with(timeout=1.0)
+    
+    @patch('psutil.Process')
+    def test_kill_process_force(self, mock_process_class):
+        """Test force kill with SIGKILL"""
+        # Mock a process
+        mock_proc = MagicMock()
+        mock_proc.kill.return_value = None
+        mock_proc.wait.return_value = None
+        mock_process_class.return_value = mock_proc
+        
+        # Add process to monitor
+        self.monitor.processes["/test_node"] = mock_proc
+        
+        # Test force kill
+        result = self.monitor.kill_process("/test_node", force=True)
+        
+        self.assertTrue(result)
+        mock_proc.kill.assert_called_once()
+        mock_proc.wait.assert_called_once_with(timeout=1.0)
+    
+    def test_kill_nonexistent_process(self):
+        """Test attempting to kill non-existent process"""
+        result = self.monitor.kill_process("/nonexistent_node")
+        self.assertFalse(result)
+    
+    @patch('psutil.Process')
+    def test_kill_process_no_such_process(self, mock_process_class):
+        """Test handling of NoSuchProcess exception"""
+        # Mock a process that raises NoSuchProcess
+        mock_proc = MagicMock()
+        mock_proc.terminate.side_effect = psutil.NoSuchProcess(1234)
+        mock_process_class.return_value = mock_proc
+        
+        # Add process to monitor
+        self.monitor.processes["/test_node"] = mock_proc
+        
+        # Test kill
+        result = self.monitor.kill_process("/test_node")
+        
+        self.assertFalse(result)
+    
+    @patch('psutil.Process')
+    def test_kill_process_access_denied(self, mock_process_class):
+        """Test handling of AccessDenied exception"""
+        # Mock a process that raises AccessDenied
+        mock_proc = MagicMock()
+        mock_proc.terminate.side_effect = psutil.AccessDenied(1234)
+        mock_process_class.return_value = mock_proc
+        
+        # Add process to monitor
+        self.monitor.processes["/test_node"] = mock_proc
+        
+        # Test kill
+        result = self.monitor.kill_process("/test_node")
+        
+        self.assertFalse(result)
 
 
 if __name__ == '__main__':
