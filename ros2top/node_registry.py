@@ -209,8 +209,12 @@ def cleanup_stale_registrations() -> int:
                 
         # Remove stale nodes
         for pid_str in stale_nodes:
-            pid = int(pid_str)
-            _remove_node_registration_by_pid(pid)
+            try:
+                pid = int(pid_str)
+                _remove_node_registration_by_pid(pid)
+            except ValueError:
+                # Skip entries with invalid PID strings
+                continue
             
         return len(stale_nodes)
         
