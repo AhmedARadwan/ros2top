@@ -42,6 +42,10 @@ class TerminalUI:
         self.last_update = 0
         self.update_interval = 1.0  # seconds
         self.paused = False
+        self.selected_row = 0  # Currently selected row in table
+        self.show_kill_dialog = False
+        self.kill_dialog_node = None
+        self.kill_dialog_pid = None
         
         # Statistics
         self.stats = {
@@ -283,6 +287,10 @@ class TerminalUI:
             # Draw layout manager components (table)
             self.layout_manager.draw(self.colors)
             
+            # Draw kill dialog if active
+            if self.show_kill_dialog:
+                self._draw_kill_dialog()
+            
             self.stdscr.refresh()
             self.last_update = current_time
             
@@ -396,7 +404,7 @@ class TerminalUI:
             section = self.controls_section
             
             # Line 1: Main controls
-            controls_line1 = "q:Quit  h:Help  r:Refresh  p:Pause/Resume  ↑↓:Navigate  Tab:Focus"
+            controls_line1 = "q:Quit  h:Help  r:Refresh  p:Pause/Resume  ↑↓:Navigate  k:Kill  Tab:Focus"
             self._addstr_with_color(section['start_y'], 0, controls_line1[:section['width']], 0)
             
             # Line 2: Status and additional info
@@ -518,6 +526,11 @@ class TerminalUI:
             rows.append(row)
         
         self.nodes_table.set_data(rows)
+        
+        # Sync selection state with table component
+        if rows:
+            self.selected_row = min(self.selected_row, len(rows) - 1)
+            self.nodes_table.selected_row = self.selected_row
     
     def _handle_input(self):
         """Handle keyboard input"""
@@ -540,6 +553,23 @@ class TerminalUI:
                 self.update_interval = max(0.5, self.update_interval - 0.5)
             elif key == ord('-'):
                 self.update_interval = min(5.0, self.update_interval + 0.5)
+            elif key == curses.KEY_UP:
+                self._move_selection(-1)
+            elif key == curses.KEY_DOWN:
+                self._move_selection(1)
+            elif key == ord('k') or key == ord('K'):
+                self._show_kill_dialog()
+            elif key == ord('y') or key == ord('Y'):
+                if self.show_kill_dialog:
+                    self._confirm_kill()
+            elif key == ord('n') or key == ord('N'):
+                if self.show_kill_dialog:
+                    self._cancel_kill()
+            elif key == 27:  # ESC key
+                if self.show_kill_dialog:
+                    self._cancel_kill()
+                else:
+                    self.show_help = False
             else:
                 # Pass to layout manager
                 if self.layout_manager:
@@ -570,6 +600,11 @@ class TerminalUI:
             "  ↑/↓      - Navigate table rows",
             "  Tab      - Switch focus between panels",
             "  Home/End - Jump to first/last row",
+            "",
+            "Process Control:",
+            "  k/K      - Kill selected process",
+            "  y/Y      - Confirm kill operation",
+            "  n/N/ESC  - Cancel kill operation",
             "",
             "Features:",
             "  • Responsive layout adapts to terminal size",
@@ -628,6 +663,76 @@ class TerminalUI:
         except curses.error:
             pass
     
+    def _move_selection(self, direction: int):
+        """Move selection up or down"""
+        nodes = self.monitor.get_node_info_list()
+        if not nodes:
+            return
+            
+        self.selected_row = max(0, min(len(nodes) - 1, self.selected_row + direction))
+    
+    def _show_kill_dialog(self):
+        """Show kill confirmation dialog for selected node"""
+        nodes = self.monitor.get_node_info_list()
+        if not nodes or self.selected_row >= len(nodes):
+            return
+            
+        selected_node = nodes[self.selected_row]
+        self.kill_dialog_node = selected_node.name
+        self.kill_dialog_pid = selected_node.pid
+        self.show_kill_dialog = True
+    
+    def _confirm_kill(self):
+        """Confirm and execute kill operation"""
+        if self.kill_dialog_node and self.kill_dialog_pid:
+            success = self.monitor.kill_process(self.kill_dialog_node, self.kill_dialog_pid)
+            if success:
+                # Force refresh to update display
+                self.monitor.force_refresh()
+            
+        self._cancel_kill()
+    
+    def _cancel_kill(self):
+        """Cancel kill operation"""
+        self.show_kill_dialog = False
+        self.kill_dialog_node = None
+        self.kill_dialog_pid = None
+    
+    def _draw_kill_dialog(self):
+        """Draw kill confirmation dialog"""
+        if not self.show_kill_dialog or not self.kill_dialog_node:
+            return
+            
+        try:
+            max_y, max_x = self.stdscr.getmaxyx()
+            
+            # Dialog dimensions
+            dialog_width = min(50, max_x - 4)
+            dialog_height = 8
+            dialog_x = (max_x - dialog_width) // 2
+            dialog_y = (max_y - dialog_height) // 2
+            
+            # Draw dialog background
+            for i in range(dialog_height):
+                self.stdscr.addstr(dialog_y + i, dialog_x, " " * dialog_width, curses.color_pair(4))
+            
+            # Dialog content
+            title = "KILL PROCESS"
+            node_line = f"Node: {self.kill_dialog_node}"
+            pid_line = f"PID: {self.kill_dialog_pid}"
+            warning = "This will terminate the selected process!"
+            confirm_line = "Continue? (Y)es / (N)o / (ESC) Cancel"
+            
+            # Center text in dialog
+            self._addstr_with_color(dialog_y + 1, dialog_x + (dialog_width - len(title)) // 2, title, 4)
+            self._addstr_with_color(dialog_y + 2, dialog_x + 2, node_line[:dialog_width-4], 0)
+            self._addstr_with_color(dialog_y + 3, dialog_x + 2, pid_line[:dialog_width-4], 0)
+            self._addstr_with_color(dialog_y + 4, dialog_x + 2, warning[:dialog_width-4], 3)
+            self._addstr_with_color(dialog_y + 6, dialog_x + 2, confirm_line[:dialog_width-4], 0)
+            
+        except curses.error:
+            pass
+
     def _show_error(self, message: str):
         """Show error message"""
         try:

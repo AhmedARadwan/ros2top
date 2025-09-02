@@ -106,19 +106,26 @@ class NodeMonitor:
     
     def _remove_dead_nodes(self, current_nodes: List[str]):
         """Remove processes for nodes that no longer exist"""
-        nodes_to_remove = [node for node in self.processes if node not in current_nodes]
-        for node in nodes_to_remove:
-            del self.processes[node]
+        # Convert current_nodes to set of unique keys for comparison
+        current_unique_keys = set()
+        for node_name, pid in self._get_all_processes_to_monitor():
+            current_unique_keys.add(f"{node_name}:{pid}")
+        
+        nodes_to_remove = [key for key in self.processes if key not in current_unique_keys]
+        for key in nodes_to_remove:
+            del self.processes[key]
     
     def _add_new_nodes_with_pids(self, nodes_with_pids: List[Tuple[str, int]]):
         """Add new nodes to monitoring using pre-discovered PIDs"""
         for node, pid in nodes_with_pids:
-            if node not in self.processes:
+            # Use a unique key combining node name and PID to allow multiple nodes with same name
+            unique_key = f"{node}:{pid}"
+            if unique_key not in self.processes:
                 try:
                     proc = psutil.Process(pid)
                     # Initialize CPU measurement
                     proc.cpu_percent()
-                    self.processes[node] = proc
+                    self.processes[unique_key] = proc
                 except psutil.NoSuchProcess:
                     pass
     
@@ -144,8 +151,11 @@ class NodeMonitor:
         """
         node_infos = []
         
-        for node_name, process in self.processes.items():
+        for unique_key, process in self.processes.items():
             try:
+                # Extract original node name from unique key (format: "node_name:pid")
+                node_name = unique_key.rsplit(':', 1)[0]
+                
                 # Get CPU usage (normalized by number of cores)
                 raw_cpu = process.cpu_percent()
                 cpu_pct = raw_cpu / self.cores if self.cores > 0 else raw_cpu
@@ -206,6 +216,59 @@ class NodeMonitor:
     def force_refresh(self):
         """Force refresh of node list on next update"""
         self.last_refresh = 0.0
+    
+    def kill_process(self, node_name: str, pid: int = None, force: bool = False) -> bool:
+        """
+        Kill a monitored process
+        
+        Args:
+            node_name: Name of the node/process to kill
+            pid: Specific PID to kill (optional, if not provided kills first match)
+            force: If True, use SIGKILL instead of SIGTERM
+            
+        Returns:
+            True if kill was successful, False otherwise
+        """
+        # Find the process to kill
+        process_to_kill = None
+        key_to_remove = None
+        
+        if pid is not None:
+            # Look for specific node name and PID combination
+            unique_key = f"{node_name}:{pid}"
+            if unique_key in self.processes:
+                process_to_kill = self.processes[unique_key]
+                key_to_remove = unique_key
+        else:
+            # Find first process matching the node name
+            for key, process in self.processes.items():
+                if key.startswith(f"{node_name}:"):
+                    process_to_kill = process
+                    key_to_remove = key
+                    break
+        
+        if process_to_kill is None:
+            return False
+            
+        try:
+            if force:
+                # Force kill with SIGKILL
+                process_to_kill.kill()
+            else:
+                # Graceful termination with SIGTERM
+                process_to_kill.terminate()
+            
+            # Wait briefly to see if process terminates
+            try:
+                process_to_kill.wait(timeout=1.0)
+            except psutil.TimeoutExpired:
+                # Process didn't terminate within timeout
+                pass
+                
+            return True
+            
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
     
     def shutdown(self):
         """Clean shutdown of monitoring"""

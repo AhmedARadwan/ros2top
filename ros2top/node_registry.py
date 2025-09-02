@@ -98,8 +98,10 @@ def unregister_node(node_name: str) -> bool:
         # Normalize node name
         if not node_name.startswith('/'):
             node_name = f'/{node_name}'
-            
-        success = _remove_node_registration(node_name)
+        
+        # Find the PID for this node name from current process
+        current_pid = os.getpid()
+        success = _remove_node_registration_by_pid(current_pid)
         
         if success and node_name in _registered_nodes:
             _registered_nodes.remove(node_name)
@@ -121,11 +123,9 @@ def heartbeat(node_name: str) -> bool:
         True if heartbeat was successful, False otherwise
     """
     try:
-        # Normalize node name
-        if not node_name.startswith('/'):
-            node_name = f'/{node_name}'
-            
-        return _update_node_heartbeat(node_name)
+        # Use current process PID to update heartbeat
+        current_pid = os.getpid()
+        return _update_node_heartbeat_by_pid(current_pid)
         
     except Exception:
         return False
@@ -144,17 +144,19 @@ def get_registered_nodes() -> List[Tuple[str, int]]:
         # Filter out stale registrations (only check if process is still running)
         active_nodes = []
         
-        for node_name, data in nodes_data.items():
+        for pid_str, data in nodes_data.items():
             # Check if process is still running
             try:
-                proc = psutil.Process(data['pid'])
+                pid = int(pid_str)
+                proc = psutil.Process(pid)
                 if proc.is_running():
                     # Process is running, include it regardless of heartbeat timing
-                    active_nodes.append((node_name, data['pid']))
+                    node_name = data.get('node_name', f'/process_{pid}')
+                    active_nodes.append((node_name, pid))
                 # Note: If heartbeats are being sent, we could add additional logic here
                 # to detect unresponsive but running nodes
-            except psutil.NoSuchProcess:
-                # Process no longer exists, will be cleaned up later
+            except (psutil.NoSuchProcess, ValueError):
+                # Process no longer exists or invalid PID, will be cleaned up later
                 pass
                 
         return active_nodes
@@ -196,17 +198,23 @@ def cleanup_stale_registrations() -> int:
         nodes_data = _read_node_registrations()
         stale_nodes = []
         
-        for node_name, data in nodes_data.items():
+        for pid_str, data in nodes_data.items():
             try:
-                proc = psutil.Process(data['pid'])
+                pid = int(pid_str)
+                proc = psutil.Process(pid)
                 if not proc.is_running():
-                    stale_nodes.append(node_name)
-            except psutil.NoSuchProcess:
-                stale_nodes.append(node_name)
+                    stale_nodes.append(pid_str)
+            except (psutil.NoSuchProcess, ValueError):
+                stale_nodes.append(pid_str)
                 
         # Remove stale nodes
-        for node_name in stale_nodes:
-            _remove_node_registration(node_name)
+        for pid_str in stale_nodes:
+            try:
+                pid = int(pid_str)
+                _remove_node_registration_by_pid(pid)
+            except ValueError:
+                # Skip entries with invalid PID strings
+                continue
             
         return len(stale_nodes)
         
@@ -278,8 +286,8 @@ def _write_node_registration(node_data: Dict) -> bool:
                         # If JSON is corrupted, start fresh
                         existing_data = {}
             
-            # Update with new node data
-            existing_data[node_data['node_name']] = node_data
+            # Update with new node data - use PID as key to allow multiple nodes with same name
+            existing_data[str(node_data['pid'])] = node_data
             
             # Write to temporary file first, then rename (atomic operation)
             temp_file = REGISTRATION_FILE + '.tmp'
@@ -425,6 +433,141 @@ def _update_node_heartbeat(node_name: str) -> bool:
                 return True
                 
             return False
+            
+        finally:
+            # Always clean up lock file
+            try:
+                os.remove(LOCK_FILE)
+            except FileNotFoundError:
+                pass
+        
+    except Exception:
+        # Clean up lock file on error
+        try:
+            os.remove(LOCK_FILE)
+        except FileNotFoundError:
+            pass
+        return False
+
+
+def _remove_node_registration_by_pid(pid: int) -> bool:
+    """Remove node registration by PID from file with file locking"""
+    
+    try:
+        if not os.path.exists(REGISTRATION_FILE):
+            return True
+        
+        # Create a lock file approach compatible with C++
+        lock_acquired = False
+        max_attempts = 100  # 1 second timeout
+        
+        for _ in range(max_attempts):
+            try:
+                # Try to create lock file exclusively
+                with open(LOCK_FILE, 'x') as lock_file:
+                    lock_file.write(str(os.getpid()))
+                    lock_acquired = True
+                    break
+            except FileExistsError:
+                # Lock file exists, wait and retry
+                time.sleep(0.01)
+                continue
+        
+        if not lock_acquired:
+            return False
+        
+        try:
+            # Read existing data
+            with open(REGISTRATION_FILE, 'r') as f:
+                try:
+                    existing_data = json.load(f)
+                except json.JSONDecodeError:
+                    # If JSON is corrupted, nothing to remove
+                    return True
+            
+            # Remove the node if it exists
+            pid_str = str(pid)
+            if pid_str in existing_data:
+                del existing_data[pid_str]
+                
+                # Write to temporary file first, then rename (atomic operation)
+                temp_file = REGISTRATION_FILE + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(existing_data, f, indent=2)
+                
+                # Atomic rename
+                shutil.move(temp_file, REGISTRATION_FILE)
+                
+            return True
+            
+        finally:
+            # Always clean up lock file
+            try:
+                os.remove(LOCK_FILE)
+            except FileNotFoundError:
+                pass
+        
+    except Exception:
+        # Clean up lock file on error
+        try:
+            os.remove(LOCK_FILE)
+        except FileNotFoundError:
+            pass
+        return False
+
+
+def _update_node_heartbeat_by_pid(pid: int) -> bool:
+    """Update the last_seen timestamp for a node by PID with file locking"""
+    
+    
+    try:
+        if not os.path.exists(REGISTRATION_FILE):
+            return False
+        
+        # Create a lock file approach compatible with C++
+        lock_acquired = False
+        max_attempts = 100  # 1 second timeout
+        
+        for _ in range(max_attempts):
+            try:
+                # Try to create lock file exclusively
+                with open(LOCK_FILE, 'x') as lock_file:
+                    lock_file.write(str(os.getpid()))
+                    lock_acquired = True
+                    break
+            except FileExistsError:
+                # Lock file exists, wait and retry
+                time.sleep(0.01)
+                continue
+        
+        if not lock_acquired:
+            return False
+        
+        try:
+            # Read existing data
+            with open(REGISTRATION_FILE, 'r') as f:
+                try:
+                    existing_data = json.load(f)
+                except json.JSONDecodeError:
+                    # If JSON is corrupted, can't update
+                    return False
+            
+            # Update heartbeat if node exists
+            pid_str = str(pid)
+            if pid_str in existing_data:
+                existing_data[pid_str]['last_seen'] = time.time()
+                
+                # Write to temporary file first, then rename (atomic operation)
+                temp_file = REGISTRATION_FILE + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(existing_data, f, indent=2)
+                
+                # Atomic rename
+                shutil.move(temp_file, REGISTRATION_FILE)
+                
+                return True
+            else:
+                return False
             
         finally:
             # Always clean up lock file
