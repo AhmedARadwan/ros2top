@@ -152,6 +152,27 @@ public:
      */
     static bool register_node(const std::string& node_name, 
                              const std::map<std::string, std::string>& additional_info = {}) {
+        json additional_json;
+        for (const auto& [key, value] : additional_info) {
+            additional_json[key] = value;
+        }
+        return register_node_impl(node_name, additional_json);
+    }
+
+    /**
+     * @brief Register a ROS2 node with ros2top monitoring (JSON overload)
+     * @param node_name Name of the ROS2 node
+     * @param additional_info Optional additional information as JSON
+     * @return true if registration was successful, false otherwise
+     */
+    static bool register_node(const std::string& node_name, 
+                             const json& additional_info) {
+        return register_node_impl(node_name, additional_info);
+    }
+
+private:
+    static bool register_node_impl(const std::string& node_name, 
+                                   const json& additional_info) {
         try {
             ensure_registry_dir();
             
@@ -168,6 +189,9 @@ public:
             // Normalize node name to match Python format
             std::string normalized_name = normalize_node_name(node_name);
             
+            // Get PID as string key (matching Python format)
+            std::string pid_key = std::to_string(getpid());
+            
             // Create node registration data (matching Python format)
             json node_data = {
                 {"node_name", normalized_name},
@@ -180,16 +204,12 @@ public:
             };
             
             // Add additional info if provided
-            if (!additional_info.empty()) {
-                json additional_json;
-                for (const auto& [key, value] : additional_info) {
-                    additional_json[key] = value;
-                }
-                node_data["additional_info"] = additional_json;
+            if (!additional_info.is_null() && !additional_info.empty()) {
+                node_data["additional_info"] = additional_info;
             }
             
-            // Use node_name as key (same as Python format)
-            registry[normalized_name] = node_data;
+            // Use PID as key (matching Python format)
+            registry[pid_key] = node_data;
             
             return write_registry_json(registry);
             
@@ -201,12 +221,16 @@ public:
             return false;
         }
     }
+
+public:
     
     /**
      * @brief Unregister a ROS2 node from ros2top monitoring
-     * @param node_name Name of the ROS2 node to unregister
+     * @param node_name Name of the ROS2 node to unregister (unused, kept for API compat)
+     * @return true if unregistration was successful, false otherwise
      */
-    static void unregister_node(const std::string& node_name) {
+    static bool unregister_node(const std::string& node_name) {
+        (void)node_name; // Lookup is by PID, matching Python behaviour
         try {
             ensure_registry_dir();
             
@@ -214,56 +238,63 @@ public:
             FileLock lock(get_lock_file());
             if (!lock.try_lock()) {
                 std::cerr << "ros2top: Failed to acquire registry lock for unregistration" << std::endl;
-                return;
+                return false;
             }
             
             // Read existing registry
             json registry = read_registry_json();
             
-            // Normalize node name
-            std::string normalized_name = normalize_node_name(node_name);
+            // Use PID as key (matching Python format)
+            std::string pid_key = std::to_string(getpid());
             
             // Remove the node if it exists
-            if (registry.contains(normalized_name)) {
-                registry.erase(normalized_name);
-                write_registry_json(registry);
+            if (registry.contains(pid_key)) {
+                registry.erase(pid_key);
+                return write_registry_json(registry);
             }
             
+            return true;
         } catch (const std::exception& e) {
             std::cerr << "ros2top: Unregistration failed: " << e.what() << std::endl;
+            return false;
         } catch (...) {
             std::cerr << "ros2top: Unregistration failed with unknown error" << std::endl;
+            return false;
         }
     }
     
     /**
      * @brief Send heartbeat to indicate the node is still alive
-     * @param node_name Name of the ROS2 node
+     * @param node_name Name of the ROS2 node (unused, kept for API compat)
+     * @return true if heartbeat was successful, false otherwise
      */
-    static void heartbeat(const std::string& node_name) {
+    static bool heartbeat(const std::string& node_name) {
+        (void)node_name; // Lookup is by PID, matching Python behaviour
         try {
             ensure_registry_dir();
             
             // Acquire file lock
             FileLock lock(get_lock_file());
             if (!lock.try_lock()) {
-                return; // Ignore heartbeat failures - not critical
+                return false;
             }
             
             // Read existing registry
             json registry = read_registry_json();
             
-            // Normalize node name
-            std::string normalized_name = normalize_node_name(node_name);
+            // Use PID as key (matching Python format)
+            std::string pid_key = std::to_string(getpid());
             
             // Update heartbeat if node exists
-            if (registry.contains(normalized_name)) {
-                registry[normalized_name]["last_seen"] = std::time(nullptr);
-                write_registry_json(registry);
+            if (registry.contains(pid_key)) {
+                registry[pid_key]["last_seen"] = std::time(nullptr);
+                return write_registry_json(registry);
             }
             
+            return false;
         } catch (...) {
             // Ignore heartbeat errors - not critical
+            return false;
         }
     }
 };
@@ -276,12 +307,17 @@ inline bool register_node(const std::string& node_name,
     return NodeRegistrar::register_node(node_name, additional_info);
 }
 
-inline void unregister_node(const std::string& node_name) {
-    NodeRegistrar::unregister_node(node_name);
+inline bool register_node(const std::string& node_name, 
+                         const nlohmann::json& additional_info) {
+    return NodeRegistrar::register_node(node_name, additional_info);
 }
 
-inline void heartbeat(const std::string& node_name) {
-    NodeRegistrar::heartbeat(node_name);
+inline bool unregister_node(const std::string& node_name) {
+    return NodeRegistrar::unregister_node(node_name);
+}
+
+inline bool heartbeat(const std::string& node_name) {
+    return NodeRegistrar::heartbeat(node_name);
 }
 
 /**

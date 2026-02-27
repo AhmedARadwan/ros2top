@@ -181,7 +181,13 @@ def get_registered_node_info(node_name: str) -> Optional[Dict]:
             node_name = f'/{node_name}'
             
         nodes_data = _read_node_registrations()
-        return nodes_data.get(node_name)
+        
+        # Keys are PIDs, so search by node_name field in values
+        for pid_str, data in nodes_data.items():
+            if data.get('node_name') == node_name:
+                return data
+        
+        return None
         
     except Exception:
         return None

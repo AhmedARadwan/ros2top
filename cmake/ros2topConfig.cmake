@@ -1,58 +1,42 @@
 # ros2topConfig.cmake
 # CMake configuration file for ros2top
+# Installed by: pip install ros2top
 
-# Find the installation prefix
-get_filename_component(ros2top_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
-get_filename_component(ros2top_CMAKE_PREFIX "${ros2top_CMAKE_DIR}/../.." ABSOLUTE)
+# Resolve the install prefix from this file's location:
+#   <prefix>/share/ros2top/cmake/ros2topConfig.cmake  →  <prefix>
+get_filename_component(_ros2top_cmake_dir "${CMAKE_CURRENT_LIST_FILE}" PATH)
+get_filename_component(_ros2top_prefix "${_ros2top_cmake_dir}/../../.." ABSOLUTE)
 
-# Set include directory - check multiple possible locations
-set(ros2top_POSSIBLE_INCLUDE_DIRS 
-    "${ros2top_CMAKE_PREFIX}/include"
-    "${ros2top_CMAKE_PREFIX}/../include"
-    "${ros2top_CMAKE_PREFIX}/../../include"
-)
+set(_ros2top_include_dir "${_ros2top_prefix}/include")
 
-# Find the actual include directory
-foreach(possible_dir ${ros2top_POSSIBLE_INCLUDE_DIRS})
-    if(EXISTS "${possible_dir}/ros2top/ros2top.hpp")
-        set(ros2top_INCLUDE_DIRS "${possible_dir}")
-        break()
-    endif()
-endforeach()
-
-# Check if the header exists
-if(ros2top_INCLUDE_DIRS AND EXISTS "${ros2top_INCLUDE_DIRS}/ros2top/ros2top.hpp")
+if(EXISTS "${_ros2top_include_dir}/ros2top/ros2top.hpp")
     set(ros2top_FOUND TRUE)
-    
-    # Create imported target
+    set(ros2top_INCLUDE_DIRS "${_ros2top_include_dir}")
+
     if(NOT TARGET ros2top::ros2top)
         add_library(ros2top::ros2top INTERFACE IMPORTED)
-        target_include_directories(ros2top::ros2top INTERFACE "${ros2top_INCLUDE_DIRS}")
-        
-        # Add C++17 requirement (needed for std::filesystem)
-        target_compile_features(ros2top::ros2top INTERFACE cxx_std_17)
-        
-        # Link filesystem library if needed (for older compilers)
+        set_target_properties(ros2top::ros2top PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_ros2top_include_dir}"
+            INTERFACE_COMPILE_FEATURES "cxx_std_17"
+        )
+
+        # Older GCC (<9) needs explicit filesystem link
         if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.0")
-            target_link_libraries(ros2top::ros2top INTERFACE stdc++fs)
+            set_property(TARGET ros2top::ros2top APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES "stdc++fs")
         endif()
     endif()
-    
-    message(STATUS "Found ros2top: ${ros2top_INCLUDE_DIRS}")
-    
-    # Set variables for compatibility
+
     set(ros2top_LIBRARIES ros2top::ros2top)
-    
+    message(STATUS "Found ros2top: ${_ros2top_include_dir}/ros2top/ros2top.hpp")
 else()
     set(ros2top_FOUND FALSE)
-    message(WARNING "ros2top headers not found. Checked paths: ${ros2top_POSSIBLE_INCLUDE_DIRS}")
+    message(FATAL_ERROR
+        "ros2top header not found at ${_ros2top_include_dir}/ros2top/ros2top.hpp\n"
+        "Make sure ros2top is installed: pip install ros2top\n"
+        "Then set CMAKE_PREFIX_PATH to the pip install prefix (e.g. ~/.local or your venv).")
 endif()
 
-# Provide helper macro for easy integration
-macro(ros2top_target_link target_name)
-    if(ros2top_FOUND)
-        target_link_libraries(${target_name} ros2top::ros2top)
-    else()
-        message(WARNING "ros2top not found, cannot link to target ${target_name}")
-    endif()
-endmacro()
+unset(_ros2top_cmake_dir)
+unset(_ros2top_prefix)
+unset(_ros2top_include_dir)
