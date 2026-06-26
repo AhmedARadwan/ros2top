@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-GPU monitoring utilities using NVIDIA Management Library (NVML)
+GPU monitoring utilities using NVIDIA Management Library (NVML).
+Also supports Jetson/Tegra devices via the sysfs GPU load interface.
 """
 
+import os
 import psutil
 from typing import Tuple, List, Optional
+
+# Jetson exposes GPU load via sysfs (raw value = percent × 10, e.g. 150 = 15%)
+_TEGRA_GPU_PATH = '/sys/devices/gpu.0/load'
 
 try:
     import pynvml
@@ -14,44 +19,65 @@ except ImportError:
     pynvml = None
 
 
+def _is_jetson() -> bool:
+    """Return True when running on a Jetson device with sysfs GPU load."""
+    return os.path.exists(_TEGRA_GPU_PATH)
+
+
+def _get_tegra_gpu_load() -> float:
+    """Read system-level GPU utilisation from Jetson sysfs. Returns 0.0 on error."""
+    try:
+        with open(_TEGRA_GPU_PATH) as f:
+            return float(f.readline().strip()) / 10.0
+    except Exception:
+        return 0.0
+
+
 class GPUMonitor:
     """Monitor GPU usage for processes"""
-    
+
     def __init__(self):
+        self._jetson = _is_jetson()
         self.gpu_available = False
         self.device_count = 0
-        
-        if NVML_AVAILABLE:
+
+        if self._jetson:
+            self.gpu_available = True
+            self.device_count = 1
+        elif NVML_AVAILABLE:
             try:
                 pynvml.nvmlInit()
                 self.device_count = pynvml.nvmlDeviceGetCount()
                 self.gpu_available = True
             except Exception:
                 self.gpu_available = False
-    
+
     def is_available(self) -> bool:
         """Check if GPU monitoring is available"""
         return self.gpu_available
-    
+
     def get_gpu_count(self) -> int:
         """Get number of available GPUs"""
         return self.device_count if self.gpu_available else 0
-    
+
     def get_gpu_ids(self) -> List[int]:
         """Get list of GPU device IDs"""
         return list(range(self.device_count)) if self.gpu_available else []
-    
+
     def get_gpu_usage(self, pid: int) -> Tuple[int, float, int]:
         """
         Get GPU usage for a specific process and its children
-        
-        Args:
-            pid: Process ID to check
-            
+
+        On Jetson the utilisation is system-wide (per-process GPU memory is
+        not available via sysfs), so memory is reported as 0.
+
         Returns:
             Tuple of (gpu_memory_mb, gpu_utilization_percent, gpu_device_id)
             Returns (0, 0.0, -1) if no GPU usage found
         """
+        if self._jetson:
+            return 0, _get_tegra_gpu_load(), 0
+
         if not self.gpu_available:
             return 0, 0.0, -1
             
@@ -123,29 +149,40 @@ class GPUMonitor:
     def get_gpu_info(self, device_id: int) -> Optional[dict]:
         """
         Get information about a specific GPU device
-        
+
         Args:
             device_id: GPU device index
-            
+
         Returns:
             Dictionary with GPU information or None if not available
         """
         if not self.gpu_available or device_id >= self.device_count:
             return None
-            
+
+        if self._jetson and device_id == 0:
+            load = _get_tegra_gpu_load()
+            return {
+                'name': 'Jetson GPU',
+                'memory_total_mb': 0,
+                'memory_used_mb': 0,
+                'memory_free_mb': 0,
+                'utilization_gpu': load,
+                'utilization_memory': 0,
+            }
+
         try:
             handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
-            
+
             # Handle both bytes and string return types from nvmlDeviceGetName
             raw_name = pynvml.nvmlDeviceGetName(handle)
             if isinstance(raw_name, bytes):
                 name = raw_name.decode('utf-8')
             else:
                 name = str(raw_name)
-                
+
             memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
             utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-            
+
             return {
                 'name': name,
                 'memory_total_mb': memory_info.total // (1024 * 1024),
@@ -156,10 +193,10 @@ class GPUMonitor:
             }
         except Exception:
             return None
-    
+
     def shutdown(self):
         """Clean shutdown of GPU monitoring"""
-        if self.gpu_available:
+        if self.gpu_available and not self._jetson:
             try:
                 pynvml.nvmlShutdown()
             except Exception:

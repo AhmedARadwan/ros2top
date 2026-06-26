@@ -6,14 +6,13 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 
 ## Features
 
-- 🔍 **Real-time monitoring** of all ROS2 nodes
+- 🔍 **Automatic node discovery** — scans running processes for colcon install-tree signatures (no code changes required in monitored nodes)
 - 💻 **CPU usage** tracking per node
 - 🧠 **RAM usage** monitoring
-- 🎮 **GPU usage** tracking (NVIDIA GPUs via NVML)
+- 🎮 **GPU usage** tracking (NVIDIA GPUs via NVML; Jetson/Tegra via sysfs)
 - 🖥️ **Terminal-based interface** using curses
 - 🔄 **Auto-refresh** with configurable intervals
 - 🏷️ **Process tree awareness** (includes child processes)
-- 📝 **Node registration API** for reliable node-to-monitor communication
 
 ## Installation
 
@@ -124,8 +123,8 @@ ros2top --refresh 2
 
 ## How It Works
 
-1. **Node Registartion**: Every node registers its name and PID at startup with ros2top.
-2. **Resource Monitoring**: Uses `psutil` for CPU/RAM and `pynvml` for GPU metrics.
+1. **Auto-Discovery**: Scans running processes with `psutil`, keeping those whose executable path is inside a colcon `install/` tree (Python nodes under `ros2/` or `rover/`, C++ nodes under `lib/`, component containers). No registration required.
+2. **Resource Monitoring**: Uses `psutil` for CPU/RAM and `pynvml` (or Jetson sysfs) for GPU metrics.
 3. **Display**: Curses-based terminal interface for real-time updates.
 
 ## Troubleshooting
@@ -172,10 +171,9 @@ ros2top/
 ├── ros2top/                 # Python package
 │   ├── __init__.py         # Package initialization and public API
 │   ├── main.py             # CLI entry point
+│   ├── discovery.py        # Automatic node discovery via psutil
 │   ├── node_monitor.py     # Core monitoring logic
-│   ├── node_registry.py    # Node registration system
-│   ├── gpu_monitor.py      # GPU monitoring
-│   ├── ros2_utils.py       # ROS2 utilities
+│   ├── gpu_monitor.py      # GPU monitoring (NVML + Jetson sysfs)
 │   └── ui/                 # User interface components
 │       ├── __init__.py
 │       ├── terminal_ui.py  # Main curses interface
@@ -248,77 +246,20 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Built for the ROS2 community
 - Uses `psutil` for system monitoring and `pynvml` for GPU monitoring
 
-## Node Registration API
-
-For the most reliable monitoring, ROS2 nodes can register themselves with `ros2top`. This is especially useful for:
-
-- Multiple nodes running in the same Python process
-- Complex applications where automatic detection might miss some nodes
-- Getting additional metadata about nodes
-
-### Basic Registration
-
-```python
-import ros2top
-
-# Register your node (call this once when your node starts)
-ros2top.register_node('/my_node_name')
-
-# Send periodic heartbeats (optional, but recommended)
-ros2top.heartbeat('/my_node_name')
-
-# Unregister when shutting down (optional, automatic cleanup on process exit)
-ros2top.unregister_node('/my_node_name')
-```
-
-### Advanced Registration with Metadata
-
-```python
-import ros2top
-
-# Register with additional information
-ros2top.register_node('/camera_processor', {
-    'description': 'Processes camera feed for object detection',
-    'type': 'vision_processor',
-    'input_topics': ['/camera/image_raw'],
-    'output_topics': ['/detected_objects'],
-    'framerate': 30
-})
-
-# In your main loop, send heartbeats every few seconds
-ros2top.heartbeat('/camera_processor')
-```
-
 ## Node Detection
 
-`ros2top` uses a **node registration system** for reliable node detection:
+`ros2top` uses **automatic process-based discovery** — no code changes are required in your nodes.
 
-### Primary Method: Node Registration API
+### How Discovery Works
 
-The most reliable way is for ROS2 nodes to explicitly register themselves:
+`discovery.py` inspects all running processes via `psutil` and identifies ROS2 nodes by their executable path:
 
-```python
-import ros2top
+- **Python nodes**: executable inside `install/.../ros2/` or `install/.../rover/`
+- **C++ nodes**: executable inside `install/.../lib/`
+- **Component containers**: `component_container_isolated` processes (node name extracted from args)
 
-# Register your node
-ros2top.register_node('/my_node', {'description': 'My awesome node'})
+### Nodes Not Showing Up?
 
-# Send periodic heartbeats (recommended)
-ros2top.heartbeat('/my_node')
-
-# Unregister when shutting down (optional - automatic cleanup on exit)
-ros2top.unregister_node('/my_node')
-```
-
-### Automatic Cleanup
-
-- Nodes are automatically unregistered when the process exits
-- Stale registrations are cleaned up periodically
-- Registry is stored in `~/.ros2top/registry/`
-
-### Benefits of Registration API
-
-- **Reliable**: No dependency on tracing or process matching
-- **Fast**: Instant node detection without scanning
-- **Accurate**: Direct PID mapping from the registering process
-- **Simple**: Works with any ROS2 node type (Python, C++, etc.)
+- Confirm nodes were built with `colcon build` (the discovery looks for `install/` in the path)
+- Nodes launched via `ros2 run` from a colcon workspace are detected automatically
+- Use `ros2top --refresh 1` to poll more frequently

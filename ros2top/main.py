@@ -17,12 +17,15 @@ def create_argument_parser():
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-    ros2top                    # Run with default settings
-    ros2top --refresh 2        # Refresh every 2 seconds
+    ros2top-auto                    # Run with default settings
+    ros2top-auto --refresh 1        # Faster discovery polling
 
-    Controls:
+Controls:
     q/Q - Quit
-    r/R - Force refresh node list
+    r/R - Force refresh
+    p/P - Pause/Resume
+    k/K - Kill node
+    +/- - Adjust speed
     h/H - Show help
     """
     )
@@ -30,8 +33,8 @@ Examples:
     parser.add_argument(
         '--refresh', '-r',
         type=float,
-        default=0.1,
-        help='Node refresh interval in seconds (default: 0.1)'
+        default=5.0,
+        help='Node list refresh interval in seconds (default: 5.0)'
     )
     
     parser.add_argument(

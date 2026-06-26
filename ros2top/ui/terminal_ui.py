@@ -411,7 +411,7 @@ class TerminalUI:
             if section['height'] > 1:
                 ros2_status = "ROS2✓" if self.monitor.is_ros2_available() else "ROS2✗"
                 node_count = self.monitor.get_nodes_count()
-                status_info = f"{ros2_status} | Nodes:{node_count} | +/-:Speed | Space:Update"
+                status_info = f"{ros2_status} | Nodes:{node_count} | Auto-discovery | +/-:Speed"
                 self._addstr_with_color(section['start_y'] + 1, 0, status_info[:section['width']], 4)
                 
         except curses.error:
@@ -606,10 +606,15 @@ class TerminalUI:
             "  y/Y      - Confirm kill operation",
             "  n/N/ESC  - Cancel kill operation",
             "",
+            "Discovery:",
+            "  Nodes are found automatically via psutil.",
+            "  No node code changes required.",
+            "  Supports Python, C++, and component nodes.",
+            "",
             "Features:",
             "  • Responsive layout adapts to terminal size",
             "  • Real-time CPU, memory, and GPU monitoring",
-            "  • Automatic node discovery via registry",
+            "  • Automatic node discovery (no registration needed)",
             "  • Color-coded usage indicators",
             "",
             "Color Legend:",

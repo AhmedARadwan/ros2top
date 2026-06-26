@@ -6,9 +6,8 @@ Core node monitoring functionality
 import time
 import psutil
 from typing import Dict, List, Optional, NamedTuple, Tuple
-from .ros2_utils import is_ros2_available, get_ros2_nodes_with_pids, check_ros2_environment
+from .discovery import discover_ros2_nodes
 from .gpu_monitor import GPUMonitor
-from .node_registry import get_registered_nodes, get_registered_node_info
 
 
 class NodeInfo(NamedTuple):
@@ -30,19 +29,24 @@ class NodeMonitor:
         self.refresh_interval = refresh_interval
         self.last_refresh = 0.0
         self.processes: Dict[str, psutil.Process] = {}
-        self.cores = psutil.cpu_count()
+        self.cores = psutil.cpu_count() or 1
         self.gpu_monitor = GPUMonitor()
-        
-        # Check ROS2 availability
-        self.ros2_available = is_ros2_available()
-    
+        self._ros2_available: Optional[bool] = None
+
     def cleanup(self):
         """Cleanup resources"""
         pass
-        
+
     def is_ros2_available(self) -> bool:
-        """Check if ROS2 is available"""
-        return self.ros2_available
+        """Check if ROS2 CLI is reachable (lazy, cached)."""
+        if self._ros2_available is None:
+            import subprocess
+            try:
+                result = subprocess.run(['ros2', '--help'], capture_output=True, timeout=5)
+                self._ros2_available = result.returncode == 0
+            except Exception:
+                self._ros2_available = False
+        return self._ros2_available
     
     def is_gpu_available(self) -> bool:
         """Check if GPU monitoring is available"""
@@ -65,12 +69,8 @@ class NodeMonitor:
             return False
             
         try:
-            # Get all processes to monitor (ROS2 nodes + registered processes)
             all_processes = self._get_all_processes_to_monitor()
-            
-            # Update processes based on discovered nodes
-            current_names = [name for name, pid in all_processes]
-            self._remove_dead_nodes(current_names)
+            self._remove_dead_nodes(all_processes)
             self._add_new_nodes_with_pids(all_processes)
             
             self.last_refresh = current_time
@@ -80,37 +80,12 @@ class NodeMonitor:
             return False
     
     def _get_all_processes_to_monitor(self) -> List[Tuple[str, int]]:
-        """Get all processes to monitor (primarily from registry, optionally including ROS2 nodes)"""
-        all_processes = []
-        
-        # Primary source: registered processes
-        try:
-            registered_nodes = get_registered_nodes()
-            all_processes.extend(registered_nodes)
-        except Exception:
-            pass
-        
-        # Secondary source: ROS2 nodes (if available and not already in registry)
-        if self.ros2_available:
-            try:
-                ros2_nodes = get_ros2_nodes_with_pids()
-                # Only add ROS2 nodes that aren't already registered
-                registered_names = {name for name, pid in all_processes}
-                for name, pid in ros2_nodes:
-                    if name not in registered_names:
-                        all_processes.append((name, pid))
-            except Exception:
-                pass
-            
-        return all_processes
-    
-    def _remove_dead_nodes(self, current_nodes: List[str]):
-        """Remove processes for nodes that no longer exist"""
-        # Convert current_nodes to set of unique keys for comparison
-        current_unique_keys = set()
-        for node_name, pid in self._get_all_processes_to_monitor():
-            current_unique_keys.add(f"{node_name}:{pid}")
-        
+        """Discover running ROS2 nodes via psutil process inspection."""
+        return discover_ros2_nodes()
+
+    def _remove_dead_nodes(self, current_nodes: List[Tuple[str, int]]):
+        """Remove processes for nodes that are no longer discovered."""
+        current_unique_keys = {f"{name}:{pid}" for name, pid in current_nodes}
         nodes_to_remove = [key for key in self.processes if key not in current_unique_keys]
         for key in nodes_to_remove:
             del self.processes[key]
@@ -164,8 +139,7 @@ class NodeMonitor:
                 memory_info = process.memory_info()
                 ram_mb = memory_info.rss / (1024 * 1024)  # Resident Set Size in MB
                 
-                # Get process start time - prefer registry registration time
-                start_time = self._get_process_start_time(node_name, process)
+                start_time = self._get_process_start_time(process)
                 
                 # Get GPU usage
                 gpu_mem, gpu_util, gpu_id = self.gpu_monitor.get_gpu_usage(process.pid)
@@ -192,17 +166,8 @@ class NodeMonitor:
         
         return node_infos
     
-    def _get_process_start_time(self, node_name: str, process: psutil.Process) -> float:
-        """Get process start time, preferring registry registration time"""
-        try:
-            # First try to get registration time from registry
-            registry_info = get_registered_node_info(node_name)
-            if registry_info and 'registration_time' in registry_info:
-                return registry_info['registration_time']
-        except Exception:
-            pass
-        
-        # Fall back to psutil create_time
+    def _get_process_start_time(self, process: psutil.Process) -> float:
+        """Get process start time from psutil."""
         try:
             return process.create_time()
         except Exception:
@@ -282,13 +247,7 @@ class NodeMonitor:
             'GPU Count': str(self.get_gpu_count()),
             'Monitored Nodes': str(self.get_nodes_count()),
         }
-        
-        # Add ROS2 environment info if available
-        try:
-            ros2_env = check_ros2_environment()
-            info.update(ros2_env)
-        except Exception:
-            # If ROS2 environment check fails, just skip it
-            info['ROS2 Available'] = str(self.ros2_available)
-        
+
+        info['ROS2 Available'] = str(self.is_ros2_available())
+
         return info
