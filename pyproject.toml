@@ -37,9 +37,9 @@ dependencies = [
 ros2top = "ros2top.main:main"
 
 [project.urls]
-Homepage = "https://github.com/AhmedARadwan/ros2top"
-"Bug Reports" = "https://github.com/AhmedARadwan/ros2top/issues"
-Source = "https://github.com/AhmedARadwan/ros2top"
+Homepage = "https://github.com/kiwicampus/ros2top-auto.git"
+"Bug Reports" = "https://github.com/kiwicampus/ros2top-auto/issues"
+Source = "https://github.com/kiwicampus/ros2top-auto.git"
 
 [tool.setuptools.dynamic]
 version = { attr = "ros2top.__version__" }

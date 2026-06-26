@@ -25,7 +25,7 @@ pip install ros2top
 ### From Source
 
 ```bash
-git clone https://github.com/AhmedARadwan/ros2top.git
+git clone https://github.com/kiwicampus/ros2top-auto.git
 cd ros2top
 pip install -e .
 ```
@@ -145,7 +145,7 @@ ros2top --refresh 2
 ### Setup Development Environment
 
 ```bash
-git clone https://github.com/AhmedARadwan/ros2top.git
+git clone https://github.com/kiwicampus/ros2top-auto.git
 cd ros2top
 pip install -e .
 ```
