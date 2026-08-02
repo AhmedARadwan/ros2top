@@ -6,6 +6,8 @@ import subprocess
 import sys
 import time
 
+import psutil
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from ros2top.node_monitor import NodeMonitor  # noqa: E402
@@ -143,6 +145,58 @@ def test_display_order_matches_kill_order():
             p.wait()
 
 
+def test_kill_removes_every_node_in_the_process():
+    """Killing one composed node kills the container, so all its nodes must go."""
+    container = _busy_process()
+    solo = _busy_process()
+    try:
+        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor._add_new_nodes_with_pids([
+            ('/my_container', container.pid),
+            ('/talker', container.pid),
+            ('/listener', container.pid),
+            ('/talker', solo.pid),      # same name, different process
+        ])
+        monitor.get_node_info_list()  # populate samplers
+        assert len(monitor.processes) == 4
+        assert set(monitor._samplers) == {container.pid, solo.pid}
+
+        # naming a PID must pick that process, not the first same-named node
+        assert monitor.kill_process('/talker', pid=solo.pid, force=True)
+        assert container.poll() is None, 'killed the wrong process'
+        assert set(monitor._samplers) == {container.pid}, monitor._samplers
+        assert [monitor._node_name_of(k) for k in monitor.processes] == [
+            '/my_container', '/talker', '/listener']
+
+        # killing any node of the container takes all three with it
+        assert monitor.kill_process('/listener', pid=container.pid, force=True)
+        assert monitor.processes == {}, monitor.processes
+        assert monitor._samplers == {}, monitor._samplers
+        print('OK: kill removes every node of the process it ends')
+    finally:
+        for p in (container, solo):
+            if p.poll() is None:
+                p.kill()
+            p.wait()
+
+
+def test_kill_tolerates_key_without_pid_suffix():
+    """Keys are 'name:pid', but the API must not break if one lacks the suffix."""
+    proc = _busy_process()
+    try:
+        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor.processes['/legacy_node'] = psutil.Process(proc.pid)
+        assert monitor.kill_process('/legacy_node', force=True)
+        assert monitor.processes == {}
+        print('OK: kill handles a key with no :pid suffix')
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
 if __name__ == '__main__':
     test_shared_pid_measured_once()
     test_display_order_matches_kill_order()
+    test_kill_removes_every_node_in_the_process()
+    test_kill_tolerates_key_without_pid_suffix()

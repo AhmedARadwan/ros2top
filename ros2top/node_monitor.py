@@ -289,36 +289,40 @@ class NodeMonitor:
         """Force refresh of node list on next update"""
         self.last_refresh = 0.0
     
+    def _node_name_of(self, key: str) -> str:
+        """Node name held in a self.processes key, tolerating a missing ':pid'"""
+        name, sep, tail = key.rpartition(':')
+        return name if sep and tail.isdigit() else key
+
     def kill_process(self, node_name: str, pid: int = None, force: bool = False) -> bool:
         """
         Kill a monitored process
-        
+
+        Killing is per process, not per node: if the target shares its process
+        with composable nodes, they all die with it.
+
         Args:
             node_name: Name of the node/process to kill
-            pid: Specific PID to kill (optional, if not provided kills first match)
+            pid: PID to kill. Node names are not unique, so without this the
+                 first match wins, which may not be the node you meant.
             force: If True, use SIGKILL instead of SIGTERM
-            
+
         Returns:
             True if kill was successful, False otherwise
         """
-        # Find the process to kill
+        # Find the process to kill. Identity comes from the stored Process
+        # object, not from parsing the key, so it holds however the key was
+        # built.
         process_to_kill = None
-        key_to_remove = None
-        
-        if pid is not None:
-            # Look for specific node name and PID combination
-            unique_key = f"{node_name}:{pid}"
-            if unique_key in self.processes:
-                process_to_kill = self.processes[unique_key]
-                key_to_remove = unique_key
-        else:
-            # Find first process matching the node name
-            for key, process in self.processes.items():
-                if key.startswith(f"{node_name}:"):
-                    process_to_kill = process
-                    key_to_remove = key
-                    break
-        
+
+        for key, process in self.processes.items():
+            if self._node_name_of(key) != node_name:
+                continue
+            if pid is not None and process.pid != pid:
+                continue
+            process_to_kill = process
+            break
+
         if process_to_kill is None:
             return False
             
@@ -336,9 +340,16 @@ class NodeMonitor:
             except psutil.TimeoutExpired:
                 # Process didn't terminate within timeout
                 pass
-                
+
+            # The whole process is gone, so drop every node it was hosting,
+            # not just the one that was selected
+            dead_pid = process_to_kill.pid
+            for key in [k for k, p in self.processes.items() if p.pid == dead_pid]:
+                del self.processes[key]
+            self._samplers.pop(dead_pid, None)
+
             return True
-            
+
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
     
