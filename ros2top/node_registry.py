@@ -26,6 +26,34 @@ def _ensure_registry_dir():
     """Ensure the registry directory exists"""
     Path(REGISTRY_DIR).mkdir(parents=True, exist_ok=True)
 
+
+def _entry_key(pid, node_name: str) -> str:
+    """
+    Registry key for one node.
+
+    Keyed by PID *and* name because neither alone is unique: several nodes can
+    share one PID (composable nodes in a component container) and several
+    processes can run nodes of the same name.
+    """
+    return f"{pid}:{node_name}"
+
+
+def _entry_pid(key: str, data: Dict) -> Optional[int]:
+    """
+    PID of a registry entry, read from the entry rather than its key.
+
+    Older Python entries were keyed by bare PID and C++ entries by node name,
+    so the key format cannot be relied on. Every writer records 'pid' in the
+    entry itself, so read that and fall back to parsing the key.
+    """
+    pid = data.get('pid')
+    if pid is None:
+        pid = key.split(':', 1)[0]
+    try:
+        return int(pid)
+    except (TypeError, ValueError):
+        return None
+
 # Keep track of registered nodes for cleanup
 _registered_nodes = set()
 
@@ -144,10 +172,12 @@ def get_registered_nodes() -> List[Tuple[str, int]]:
         # Filter out stale registrations (only check if process is still running)
         active_nodes = []
         
-        for pid_str, data in nodes_data.items():
+        for key, data in nodes_data.items():
             # Check if process is still running
+            pid = _entry_pid(key, data)
+            if pid is None:
+                continue
             try:
-                pid = int(pid_str)
                 proc = psutil.Process(pid)
                 if proc.is_running():
                     # Process is running, include it regardless of heartbeat timing
@@ -165,13 +195,15 @@ def get_registered_nodes() -> List[Tuple[str, int]]:
         return []
 
 
-def get_registered_node_info(node_name: str) -> Optional[Dict]:
+def get_registered_node_info(node_name: str, pid: Optional[int] = None) -> Optional[Dict]:
     """
     Get detailed information about a registered node
-    
+
     Args:
         node_name: Name of the ROS2 node
-        
+        pid: PID hosting the node. Node names are not unique - the same name can
+             run in several processes - so pass this whenever it is known.
+
     Returns:
         Dictionary with node information or None if not found
     """
@@ -179,10 +211,17 @@ def get_registered_node_info(node_name: str) -> Optional[Dict]:
         # Normalize node name
         if not node_name.startswith('/'):
             node_name = f'/{node_name}'
-            
+
         nodes_data = _read_node_registrations()
-        return nodes_data.get(node_name)
-        
+        # Match on the recorded name, not the key: keys have varied between
+        # bare PID, bare node name and "pid:node_name" across versions.
+        for key, data in nodes_data.items():
+            if data.get('node_name') != node_name and key != node_name:
+                continue
+            if pid is None or _entry_pid(key, data) == pid:
+                return data
+        return None
+
     except Exception:
         return None
 
@@ -198,24 +237,25 @@ def cleanup_stale_registrations() -> int:
         nodes_data = _read_node_registrations()
         stale_nodes = []
         
-        for pid_str, data in nodes_data.items():
-            try:
-                pid = int(pid_str)
-                proc = psutil.Process(pid)
-                if not proc.is_running():
-                    stale_nodes.append(pid_str)
-            except (psutil.NoSuchProcess, ValueError):
-                stale_nodes.append(pid_str)
-                
-        # Remove stale nodes
-        for pid_str in stale_nodes:
-            try:
-                pid = int(pid_str)
-                _remove_node_registration_by_pid(pid)
-            except ValueError:
-                # Skip entries with invalid PID strings
+        for key, data in nodes_data.items():
+            pid = _entry_pid(key, data)
+            if pid is None:
+                stale_nodes.append((key, None))
                 continue
-            
+            try:
+                if not psutil.Process(pid).is_running():
+                    stale_nodes.append((key, pid))
+            except (psutil.NoSuchProcess, ValueError):
+                stale_nodes.append((key, pid))
+
+        # Remove stale nodes
+        for key, pid in stale_nodes:
+            if pid is None:
+                # Unparseable entry: drop it by key so it cannot linger forever
+                _remove_node_registration_by_key(key)
+            else:
+                _remove_node_registration_by_pid(pid)
+
         return len(stale_nodes)
         
     except Exception:
@@ -286,8 +326,9 @@ def _write_node_registration(node_data: Dict) -> bool:
                         # If JSON is corrupted, start fresh
                         existing_data = {}
             
-            # Update with new node data - use PID as key to allow multiple nodes with same name
-            existing_data[str(node_data['pid'])] = node_data
+            # Key on PID + name so a container hosting several composable nodes
+            # keeps one entry per node instead of overwriting itself
+            existing_data[_entry_key(node_data['pid'], node_data['node_name'])] = node_data
             
             # Write to temporary file first, then rename (atomic operation)
             temp_file = REGISTRATION_FILE + '.tmp'
@@ -352,10 +393,13 @@ def _remove_node_registration(node_name: str) -> bool:
                     # If JSON is corrupted, nothing to remove
                     return True
             
-            # Remove the node if it exists
-            if node_name in existing_data:
-                del existing_data[node_name]
-                
+            # Match on the recorded node name, not the key format
+            doomed = [k for k, d in existing_data.items()
+                      if d.get('node_name') == node_name or k == node_name]
+            if doomed:
+                for k in doomed:
+                    del existing_data[k]
+
                 # Write to temporary file first, then rename (atomic operation)
                 temp_file = REGISTRATION_FILE + '.tmp'
                 with open(temp_file, 'w') as f:
@@ -418,10 +462,13 @@ def _update_node_heartbeat(node_name: str) -> bool:
                     # If JSON is corrupted, can't update
                     return False
             
-            # Update heartbeat if node exists
-            if node_name in existing_data:
-                existing_data[node_name]['last_seen'] = time.time()
-                
+            # Match on the recorded node name, not the key format
+            touched = [k for k, d in existing_data.items()
+                       if d.get('node_name') == node_name or k == node_name]
+            if touched:
+                for k in touched:
+                    existing_data[k]['last_seen'] = time.time()
+
                 # Write to temporary file first, then rename (atomic operation)
                 temp_file = REGISTRATION_FILE + '.tmp'
                 with open(temp_file, 'w') as f:
@@ -450,9 +497,14 @@ def _update_node_heartbeat(node_name: str) -> bool:
         return False
 
 
-def _remove_node_registration_by_pid(pid: int) -> bool:
-    """Remove node registration by PID from file with file locking"""
-    
+def _remove_node_registration_by_key(key: str) -> bool:
+    """Remove one registry entry by its exact key"""
+    return _remove_node_registration_by_pid(None, key=key)
+
+
+def _remove_node_registration_by_pid(pid: Optional[int], key: str = None) -> bool:
+    """Remove node registrations by PID (or by exact key) with file locking"""
+
     try:
         if not os.path.exists(REGISTRATION_FILE):
             return True
@@ -485,11 +537,16 @@ def _remove_node_registration_by_pid(pid: int) -> bool:
                     # If JSON is corrupted, nothing to remove
                     return True
             
-            # Remove the node if it exists
-            pid_str = str(pid)
-            if pid_str in existing_data:
-                del existing_data[pid_str]
-                
+            # A dead PID takes every node it hosted with it, so remove them all
+            if key is not None:
+                doomed = [k for k in existing_data if k == key]
+            else:
+                doomed = [k for k, d in existing_data.items()
+                          if _entry_pid(k, d) == pid]
+            if doomed:
+                for k in doomed:
+                    del existing_data[k]
+
                 # Write to temporary file first, then rename (atomic operation)
                 temp_file = REGISTRATION_FILE + '.tmp'
                 with open(temp_file, 'w') as f:
@@ -552,11 +609,13 @@ def _update_node_heartbeat_by_pid(pid: int) -> bool:
                     # If JSON is corrupted, can't update
                     return False
             
-            # Update heartbeat if node exists
-            pid_str = str(pid)
-            if pid_str in existing_data:
-                existing_data[pid_str]['last_seen'] = time.time()
-                
+            # One heartbeat from a process refreshes every node it hosts
+            touched = [k for k, d in existing_data.items()
+                       if _entry_pid(k, d) == pid]
+            if touched:
+                for k in touched:
+                    existing_data[k]['last_seen'] = time.time()
+
                 # Write to temporary file first, then rename (atomic operation)
                 temp_file = REGISTRATION_FILE + '.tmp'
                 with open(temp_file, 'w') as f:
