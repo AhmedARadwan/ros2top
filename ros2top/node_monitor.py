@@ -5,6 +5,7 @@ Core node monitoring functionality
 
 import time
 import psutil
+from collections import defaultdict
 from typing import Dict, List, Optional, NamedTuple, Tuple
 from .ros2_utils import is_ros2_available, get_ros2_nodes_with_pids, check_ros2_environment
 from .gpu_monitor import GPUMonitor
@@ -21,6 +22,10 @@ class NodeInfo(NamedTuple):
     gpu_utilization: float
     gpu_device_id: int
     start_time: float  # Unix timestamp
+    # How many monitored nodes live in this PID. >1 means composable nodes in a
+    # shared container: the cpu/ram/gpu figures above are whole-process values
+    # that cannot be split per node, and are identical for each of them.
+    shared_count: int = 1
 
 
 class NodeMonitor:
@@ -30,6 +35,10 @@ class NodeMonitor:
         self.refresh_interval = refresh_interval
         self.last_refresh = 0.0
         self.processes: Dict[str, psutil.Process] = {}
+        # One sampler per PID, so a process hosting N nodes is measured once.
+        # Keeping the same object across refreshes keeps cpu_percent()'s
+        # interval baseline fresh.
+        self._samplers: Dict[int, psutil.Process] = {}
         self.cores = psutil.cpu_count()
         self.gpu_monitor = GPUMonitor()
         
@@ -123,8 +132,9 @@ class NodeMonitor:
             if unique_key not in self.processes:
                 try:
                     proc = psutil.Process(pid)
-                    # Initialize CPU measurement
-                    proc.cpu_percent()
+                    # Start the CPU measurement interval now, not on first read,
+                    # otherwise the node's first displayed sample is always 0.0
+                    self._sampler(pid)
                     self.processes[unique_key] = proc
                 except psutil.NoSuchProcess:
                     pass
@@ -149,54 +159,116 @@ class NodeMonitor:
         Returns:
             List of NodeInfo objects
         """
+        # Composable nodes share one process, so group by PID and sample each
+        # process exactly once. Sampling per node would query psutil/NVML N
+        # times for the same PID and report that process's CPU, RAM and GPU
+        # memory N times over in any total.
+        nodes_by_pid: Dict[int, List[str]] = defaultdict(list)
+        for unique_key in self.processes:
+            node_name, _, pid = unique_key.rpartition(':')
+            nodes_by_pid[int(pid)].append(node_name)
+
+        self._prune_samplers(set(nodes_by_pid))
+
         node_infos = []
-        
-        for unique_key, process in self.processes.items():
+
+        for pid, node_names in nodes_by_pid.items():
             try:
-                # Extract original node name from unique key (format: "node_name:pid")
-                node_name = unique_key.rsplit(':', 1)[0]
-                
+                process = self._sampler(pid)
+
                 # Get CPU usage (normalized by number of cores)
                 raw_cpu = process.cpu_percent()
                 cpu_pct = raw_cpu / self.cores if self.cores > 0 else raw_cpu
-                
+
                 # Get RAM memory usage in MB
                 memory_info = process.memory_info()
                 ram_mb = memory_info.rss / (1024 * 1024)  # Resident Set Size in MB
-                
-                # Get process start time - prefer registry registration time
-                start_time = self._get_process_start_time(node_name, process)
-                
+
                 # Get GPU usage
-                gpu_mem, gpu_util, gpu_id = self.gpu_monitor.get_gpu_usage(process.pid)
-                
-                node_info = NodeInfo(
-                    name=node_name,
-                    pid=process.pid,
-                    cpu_percent=cpu_pct,
-                    ram_mb=ram_mb,
-                    gpu_memory_mb=gpu_mem,
-                    gpu_utilization=gpu_util,
-                    gpu_device_id=gpu_id,
-                    start_time=start_time
-                )
-                
-                node_infos.append(node_info)
-                
+                gpu_mem, gpu_util, gpu_id = self.gpu_monitor.get_gpu_usage(pid)
+
             except psutil.NoSuchProcess:
                 # Process died, will be cleaned up in next update
                 continue
             except Exception:
                 # Skip this process if we can't get info
                 continue
-        
+
+            # Every node in this process reports the same whole-process figures;
+            # shared_count tells the UI they must not be read as per-node.
+            for node_name in node_names:
+                node_infos.append(NodeInfo(
+                    name=node_name,
+                    pid=pid,
+                    cpu_percent=cpu_pct,
+                    ram_mb=ram_mb,
+                    gpu_memory_mb=gpu_mem,
+                    gpu_utilization=gpu_util,
+                    gpu_device_id=gpu_id,
+                    # Start time is per node: a composed node is loaded into an
+                    # already-running container, so it is younger than the process.
+                    start_time=self._get_process_start_time(node_name, process),
+                    shared_count=len(node_names),
+                ))
+
+        # Stable, process-grouped order. The UI selects and kills by row index
+        # into this list, so it must not sort independently or the row on screen
+        # and the node acted on would drift apart.
+        #
+        # Within a process the oldest node comes first: composable nodes are
+        # loaded into an already-running container, so the container's own node
+        # is always the eldest and belongs at the head of its group.
+        node_infos.sort(key=lambda n: (n.pid, n.start_time, n.name or ""))
         return node_infos
+
+    def _sampler(self, pid: int) -> psutil.Process:
+        """Get the cached psutil.Process used to measure this PID"""
+        process = self._samplers.get(pid)
+        if process is None:
+            process = psutil.Process(pid)
+            process.cpu_percent()  # prime the interval baseline
+            self._samplers[pid] = process
+        return process
+
+    def _prune_samplers(self, live_pids: set):
+        """Drop samplers for PIDs we no longer monitor"""
+        for pid in [p for p in self._samplers if p not in live_pids]:
+            del self._samplers[pid]
+
+    def get_process_totals(self, node_infos: Optional[List[NodeInfo]] = None
+                           ) -> Tuple[float, float, int]:
+        """
+        Aggregate CPU%, RAM MB and GPU MB across monitored processes.
+
+        Counts each PID once, so a container hosting N nodes contributes its
+        usage a single time rather than N times.
+
+        Pass the list from get_node_info_list() to total the numbers already on
+        screen; omitting it takes a fresh sample over a new, very short CPU
+        interval, which will not match the displayed rows.
+        """
+        if node_infos is None:
+            node_infos = self.get_node_info_list()
+
+        seen = set()
+        cpu = ram = 0.0
+        gpu = 0
+        for info in node_infos:
+            if info.pid in seen:
+                continue
+            seen.add(info.pid)
+            cpu += info.cpu_percent
+            ram += info.ram_mb
+            gpu += info.gpu_memory_mb
+        return cpu, ram, gpu
     
     def _get_process_start_time(self, node_name: str, process: psutil.Process) -> float:
-        """Get process start time, preferring registry registration time"""
+        """Get node start time, preferring registry registration time"""
         try:
-            # First try to get registration time from registry
-            registry_info = get_registered_node_info(node_name)
+            # First try to get registration time from registry. Pass the PID:
+            # two processes can host nodes of the same name, and a container's
+            # composed nodes each register at their own time.
+            registry_info = get_registered_node_info(node_name, process.pid)
             if registry_info and 'registration_time' in registry_info:
                 return registry_info['registration_time']
         except Exception:
@@ -273,6 +345,7 @@ class NodeMonitor:
     def shutdown(self):
         """Clean shutdown of monitoring"""
         self.processes.clear()
+        self._samplers.clear()
         self.gpu_monitor.shutdown()
     
     def get_system_info(self) -> Dict[str, str]:

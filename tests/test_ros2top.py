@@ -248,16 +248,18 @@ class TestRegistryStartTime(unittest.TestCase):
         
         # Mock psutil process
         mock_proc = MagicMock()
+        mock_proc.pid = 1234
         mock_proc.create_time.return_value = 1234567800.0  # Different time
         mock_process.return_value = mock_proc
-        
+
         # Create monitor and test start time retrieval
         monitor = NodeMonitor()
         start_time = monitor._get_process_start_time("/test_node", mock_proc)
-        
+
         # Should use registry time, not psutil time
         self.assertEqual(start_time, registry_start_time)
-        mock_get_info.assert_called_once_with("/test_node")
+        # PID is passed too: the same node name can run in several processes
+        mock_get_info.assert_called_once_with("/test_node", 1234)
     
     @patch('ros2top.node_monitor.get_registered_node_info')
     @patch('psutil.Process')
