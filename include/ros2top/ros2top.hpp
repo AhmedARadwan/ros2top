@@ -188,8 +188,10 @@ public:
                 node_data["additional_info"] = additional_json;
             }
             
-            // Use node_name as key (same as Python format)
-            registry[normalized_name] = node_data;
+            // Key on PID + name, matching the Python format exactly. Node name
+            // alone is not unique: a component container hosts several nodes in
+            // one process, and they would overwrite each other.
+            registry[std::to_string(getpid()) + ":" + normalized_name] = node_data;
             
             return write_registry_json(registry);
             
@@ -224,8 +226,9 @@ public:
             std::string normalized_name = normalize_node_name(node_name);
             
             // Remove the node if it exists
-            if (registry.contains(normalized_name)) {
-                registry.erase(normalized_name);
+            std::string key = std::to_string(getpid()) + ":" + normalized_name;
+            if (registry.contains(key)) {
+                registry.erase(key);
                 write_registry_json(registry);
             }
             
@@ -257,8 +260,9 @@ public:
             std::string normalized_name = normalize_node_name(node_name);
             
             // Update heartbeat if node exists
-            if (registry.contains(normalized_name)) {
-                registry[normalized_name]["last_seen"] = std::time(nullptr);
+            std::string key = std::to_string(getpid()) + ":" + normalized_name;
+            if (registry.contains(key)) {
+                registry[key]["last_seen"] = std::time(nullptr);
                 write_registry_json(registry);
             }
             
