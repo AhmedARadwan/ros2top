@@ -84,5 +84,65 @@ def test_shared_pid_measured_once():
             p.wait()
 
 
+def test_display_order_matches_kill_order():
+    """The UI kills by row index, so table order must equal get_node_info_list()."""
+    from unittest.mock import MagicMock
+    from ros2top.ui.terminal_ui import TerminalUI
+
+    container = _busy_process()
+    solo = _busy_process()
+    try:
+        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor._add_new_nodes_with_pids([
+            ('/zzz_composed_later', container.pid),
+            ('/aaa_other_process', solo.pid),
+            ('/mmm_container', container.pid),
+        ])
+
+        # The container is the eldest node in its process; the composed node is
+        # loaded later. Names are chosen so alphabetical order would disagree.
+        now = time.time()
+        monitor._get_process_start_time = lambda name, proc: {
+            '/mmm_container': now - 100,
+            '/zzz_composed_later': now - 10,
+            '/aaa_other_process': now - 50,
+        }[name]
+
+        infos = monitor.get_node_info_list()
+
+        # grouped by pid, so same-process nodes are adjacent
+        pids = [i.pid for i in infos]
+        assert pids == sorted(pids), f'not grouped by pid: {pids}'
+
+        # the container heads its group despite sorting last alphabetically
+        group = [i.name for i in infos if i.pid == container.pid]
+        assert group[0] == '/mmm_container', f'container should head group: {group}'
+
+        ui = TerminalUI(monitor)
+        captured = {}
+        ui.nodes_table = MagicMock()
+        ui.nodes_table.set_data.side_effect = lambda r: captured.setdefault('rows', r)
+        ui.table_section = {'width': 100}
+        ui._update_nodes_table()
+
+        # last column is the node name, plus connector and/or count suffix
+        names = [r[-1].split('(+')[0].strip().lstrip('- ') for r in captured['rows']]
+        assert names == [i.name for i in infos], (
+            f'display order {names} != kill order {[i.name for i in infos]}')
+
+        # the container row announces the group; children hang off it
+        header = [r[-1] for r in captured['rows'] if '/mmm_container' in r[-1]][0]
+        assert header.startswith('/mmm_container') and '(+1 nodes)' in header, header
+        child = [r[-1] for r in captured['rows'] if '/zzz_composed_later' in r[-1]][0]
+        assert child.startswith('  - '), child
+        print('OK: container heads group, display order matches kill order')
+    finally:
+        for p in (container, solo):
+            if p.poll() is None:
+                p.kill()
+            p.wait()
+
+
 if __name__ == '__main__':
     test_shared_pid_measured_once()
+    test_display_order_matches_kill_order()

@@ -46,7 +46,8 @@ class TerminalUI:
         self.show_kill_dialog = False
         self.kill_dialog_node = None
         self.kill_dialog_pid = None
-        
+        self.kill_dialog_shared = 1
+
         # Statistics
         self.stats = {
             'updates': 0,
@@ -491,28 +492,54 @@ class TerminalUI:
         available_width = self.table_section['width'] if hasattr(self, 'table_section') and self.table_section else 80
         node_name_width = max(20, available_width - fixed_columns_width - separators_width)
         
+        # get_node_info_list() already returns nodes grouped by PID, and the
+        # kill path selects by row index into that same list, so do not reorder
+        # here. Connectors are plain ASCII: the locale is never initialised for
+        # curses, so box-drawing characters would render as garbage.
+
         # Convert to table rows with specified columns:
         # PID, Uptime, %CPU, RAM(MB), GPU#, %GPU, GMEM(MB), Node Name
         rows = []
-        for node in nodes:
-            # Calculate uptime using the new formatting function
-            uptime = self._format_uptime(node.start_time)
-            
+        for idx, node in enumerate(nodes):
+            grouped = node.shared_count > 1
+            first_of_group = idx == 0 or nodes[idx - 1].pid != node.pid
+
+            # The group's first node is the process's own node (its container),
+            # so it heads the group unindented and owns the usage columns. The
+            # nodes composed into it hang off it.
+            if grouped and not first_of_group:
+                prefix = "  - "
+            else:
+                prefix = ""
+
             # Get node name - use full available width
             node_name = node.name if node.name else "unknown"
-            # Truncate to available width
-            if len(node_name) > node_name_width:
-                node_name = node_name[:node_name_width - 3] + "..."
-            
+            # A container's row says how many nodes it is hosting, so the group
+            # is still obvious when it scrolls past the top of the table
+            suffix = f"  (+{node.shared_count - 1} nodes)" if grouped and first_of_group else ""
+            # Truncate to available width, keeping connector and suffix intact
+            budget = node_name_width - len(prefix) - len(suffix)
+            if len(node_name) > budget:
+                node_name = node_name[:budget - 3] + "..."
+            node_name = prefix + node_name + suffix
+
+            # CPU/RAM/GPU belong to the process, not the node, so they appear
+            # once per group. Repeating them invites reading three nodes as
+            # three times the CPU. Uptime stays on every row: it is each node's
+            # own registration time, and a node composed into an already-running
+            # container is genuinely younger than the process hosting it.
+            show_usage = first_of_group
             row = [
-                str(node.pid),                    # PID
-                uptime,                          # Uptime
-                f"{node.cpu_percent:.1f}",       # %CPU
-                f"{node.ram_mb:.1f}",            # RAM(MB)
+                str(node.pid) if first_of_group else "",   # PID
+                self._format_uptime(node.start_time),      # Uptime
+                f"{node.cpu_percent:.1f}" if show_usage else "",   # %CPU
+                f"{node.ram_mb:.1f}" if show_usage else "",        # RAM(MB)
             ]
-            
+
             # Add GPU columns
-            if node.gpu_device_id >= 0:
+            if not show_usage:
+                row.extend(["", "", ""])
+            elif node.gpu_device_id >= 0:
                 row.extend([
                     str(node.gpu_device_id),           # GPU#
                     f"{node.gpu_utilization:.1f}",     # %GPU
@@ -520,11 +547,11 @@ class TerminalUI:
                 ])
             else:
                 row.extend(["--", "--", "--"])
-            
+
             row.append(node_name)                # Node Name
-            
+
             rows.append(row)
-        
+
         self.nodes_table.set_data(rows)
         
         # Sync selection state with table component
@@ -612,6 +639,16 @@ class TerminalUI:
             "  • Automatic node discovery via registry",
             "  • Color-coded usage indicators",
             "",
+            "Component Containers:",
+            "  -        - Nodes indented under a container run inside that",
+            "             same process. The container heads the group and",
+            "             carries the CPU/RAM/GPU, which are whole-process",
+            "             values that cannot be split per node.",
+            "             Uptime stays per node: a composed node is loaded",
+            "             into a running container, so it is the younger one.",
+            "             Killing any node in a group kills the whole",
+            "             process, and every node in it.",
+            "",
             "Color Legend:",
             "  Green    - Low usage (< 50%)",
             "  Yellow   - Medium usage (50-80%)",
@@ -680,6 +717,7 @@ class TerminalUI:
         selected_node = nodes[self.selected_row]
         self.kill_dialog_node = selected_node.name
         self.kill_dialog_pid = selected_node.pid
+        self.kill_dialog_shared = selected_node.shared_count
         self.show_kill_dialog = True
     
     def _confirm_kill(self):
@@ -697,6 +735,7 @@ class TerminalUI:
         self.show_kill_dialog = False
         self.kill_dialog_node = None
         self.kill_dialog_pid = None
+        self.kill_dialog_shared = 1
     
     def _draw_kill_dialog(self):
         """Draw kill confirmation dialog"""
@@ -708,7 +747,7 @@ class TerminalUI:
             
             # Dialog dimensions
             dialog_width = min(50, max_x - 4)
-            dialog_height = 8
+            dialog_height = 8 if self.kill_dialog_shared <= 1 else 9
             dialog_x = (max_x - dialog_width) // 2
             dialog_y = (max_y - dialog_height) // 2
             
@@ -722,13 +761,20 @@ class TerminalUI:
             pid_line = f"PID: {self.kill_dialog_pid}"
             warning = "This will terminate the selected process!"
             confirm_line = "Continue? (Y)es / (N)o / (ESC) Cancel"
-            
+
             # Center text in dialog
             self._addstr_with_color(dialog_y + 1, dialog_x + (dialog_width - len(title)) // 2, title, 4)
             self._addstr_with_color(dialog_y + 2, dialog_x + 2, node_line[:dialog_width-4], 0)
             self._addstr_with_color(dialog_y + 3, dialog_x + 2, pid_line[:dialog_width-4], 0)
             self._addstr_with_color(dialog_y + 4, dialog_x + 2, warning[:dialog_width-4], 3)
-            self._addstr_with_color(dialog_y + 6, dialog_x + 2, confirm_line[:dialog_width-4], 0)
+            row = dialog_y + 5
+            if self.kill_dialog_shared > 1:
+                # There is no way to kill one composed node: the signal goes to
+                # the process, taking all of its nodes down with it.
+                shared_line = f"Also kills {self.kill_dialog_shared - 1} other node(s) in this process!"
+                self._addstr_with_color(row, dialog_x + 2, shared_line[:dialog_width-4], 3)
+                row += 1
+            self._addstr_with_color(row + 1, dialog_x + 2, confirm_line[:dialog_width-4], 0)
             
         except curses.error:
             pass
