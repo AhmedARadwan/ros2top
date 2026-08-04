@@ -2,6 +2,8 @@
 
 A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop` but for ROS2 nodes.
 
+Tested on **Humble**, **Jazzy**, **Kilted** and **Rolling**.
+
 <!-- ![ROS2Top Demo]() -->
 
 ## Features
@@ -18,13 +20,43 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 - 📦 **Component container aware** - composable nodes are grouped under the container hosting them
 - 📝 **Node registration API** for reliable node-to-monitor communication
 
-## Installation
+## Supported ROS 2 distributions
 
-### From PyPI (when published)
+Verified in the official `ros:<distro>` containers: installed with `pip`, then
+checked for the full unit suite, the `ros2 top` sub-command, and live
+auto-discovery of C++, Python and composable nodes against their real PIDs.
+
+| Distribution | Ubuntu | Default RMW | Auto-discovery | `ros2 top` | Status |
+| ------------ | ------ | ----------- | -------------- | ---------- | ------ |
+| **Humble** Hawksbill | 22.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
+| **Jazzy** Jalisco | 24.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
+| **Kilted** Kaiju | 24.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
+| **Rolling** Ridley | 24.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
+
+Iron Irwini is not tested; it reached end of life in November 2024.
+
+Auto-discovery depends on the **middleware**, not the distribution. All four
+default to Fast DDS, whose GUID carries the process id. Under `rmw_zenoh_cpp` or
+Cyclone DDS the graph carries no PID, so nodes must register themselves - ros2top
+detects this and says so in the status bar rather than showing an empty table.
+
+## Installation
 
 ```bash
 pip install ros2top
 ```
+
+On **Ubuntu 24.04 and newer** (Jazzy, Kilted, Rolling) the system interpreter is
+marked externally managed (PEP 668), so pip needs to be told explicitly:
+
+```bash
+pip install --break-system-packages ros2top
+# or, preferred, a venv that can still see the ROS 2 packages:
+python3 -m venv --system-site-packages ~/.venvs/ros2top
+source ~/.venvs/ros2top/bin/activate && pip install ros2top
+```
+
+Humble (Ubuntu 22.04) needs no flag.
 
 ### From Source
 
@@ -33,6 +65,12 @@ git clone https://github.com/AhmedARadwan/ros2top.git
 cd ros2top
 pip install -e .
 ```
+
+> **Note:** installing *from source* needs pip 23 or newer to read this
+> project's `pyproject.toml` metadata. The pip 22.0.2 that ships with Ubuntu
+> 22.04 installs an empty `UNKNOWN-0.0.0` package instead, and reports success.
+> Run `pip install --upgrade pip` first, or install the released wheel with
+> `pip install ros2top`, which works on every version tested.
 
 ## Requirements
 
@@ -196,6 +234,15 @@ whole process, taking every node in it - the kill dialog warns before it does.
 
 - Install NVIDIA drivers
 - Install pynvml: `pip install pynvml`
+
+### `pip install` succeeded but `ros2top` is missing
+
+If you installed from source on Ubuntu 22.04, check what pip actually installed:
+
+```bash
+pip show ros2top      # 'UNKNOWN 0.0.0' means pip was too old
+pip install --upgrade pip && pip install -e .
+```
 
 ### Nodes not showing up
 

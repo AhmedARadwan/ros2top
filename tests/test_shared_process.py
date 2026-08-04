@@ -24,7 +24,7 @@ def test_shared_pid_measured_once():
     container = _busy_process()
     solo = _busy_process()
     try:
-        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor = NodeMonitor(refresh_interval=0.0, auto_discovery=False)
         # Three composable nodes in one container + one standalone node.
         monitor._add_new_nodes_with_pids([
             ('/talker', container.pid),
@@ -94,7 +94,7 @@ def test_display_order_matches_kill_order():
     container = _busy_process()
     solo = _busy_process()
     try:
-        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor = NodeMonitor(refresh_interval=0.0, auto_discovery=False)
         monitor._add_new_nodes_with_pids([
             ('/zzz_composed_later', container.pid),
             ('/aaa_other_process', solo.pid),
@@ -150,7 +150,7 @@ def test_kill_removes_every_node_in_the_process():
     container = _busy_process()
     solo = _busy_process()
     try:
-        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor = NodeMonitor(refresh_interval=0.0, auto_discovery=False)
         monitor._add_new_nodes_with_pids([
             ('/my_container', container.pid),
             ('/talker', container.pid),
@@ -184,7 +184,7 @@ def test_kill_tolerates_key_without_pid_suffix():
     """Keys are 'name:pid', but the API must not break if one lacks the suffix."""
     proc = _busy_process()
     try:
-        monitor = NodeMonitor(refresh_interval=0.0)
+        monitor = NodeMonitor(refresh_interval=0.0, auto_discovery=False)
         monitor.processes['/legacy_node'] = psutil.Process(proc.pid)
         assert monitor.kill_process('/legacy_node', force=True)
         assert monitor.processes == {}

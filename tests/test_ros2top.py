@@ -114,14 +114,14 @@ class TestNodeMonitor(unittest.TestCase):
     def test_node_monitor_init(self, mock_ros2_available):
         """Test node monitor initialization"""
         mock_ros2_available.return_value = True
-        monitor = NodeMonitor()
+        monitor = NodeMonitor(auto_discovery=False)
         self.assertTrue(monitor.is_ros2_available())
     
     @patch('ros2top.node_monitor.is_ros2_available')
     def test_node_monitor_no_ros2(self, mock_ros2_available):
         """Test node monitor when ROS2 is not available"""
         mock_ros2_available.return_value = False
-        monitor = NodeMonitor()
+        monitor = NodeMonitor(auto_discovery=False)
         self.assertFalse(monitor.is_ros2_available())
         
         # Should still be able to update nodes (for registry-based monitoring)
@@ -136,7 +136,7 @@ class TestNodeMonitor(unittest.TestCase):
         mock_ros2_available.return_value = False
         mock_get_registered.return_value = [("/test_node", 1234)]
         
-        monitor = NodeMonitor(refresh_interval=0.1)  # Fast refresh for testing
+        monitor = NodeMonitor(refresh_interval=0.1, auto_discovery=False)  # Fast refresh for testing
         result = monitor.update_nodes()
         self.assertTrue(result)
     
@@ -166,7 +166,7 @@ class TestNodeMonitor(unittest.TestCase):
     def test_node_monitor_system_info(self, mock_ros2_available):
         """Test getting system information"""
         mock_ros2_available.return_value = True
-        monitor = NodeMonitor()
+        monitor = NodeMonitor(auto_discovery=False)
         
         system_info = monitor.get_system_info()
         
@@ -215,7 +215,7 @@ class TestUIFormatting(unittest.TestCase):
         mock_time.return_value = 1234567890.0
         
         # Create a UI instance
-        monitor = NodeMonitor()
+        monitor = NodeMonitor(auto_discovery=False)
         ui = TerminalUI(monitor)
         
         # Test various cases
@@ -254,7 +254,7 @@ class TestRegistryStartTime(unittest.TestCase):
         mock_process.return_value = mock_proc
 
         # Create monitor and test start time retrieval
-        monitor = NodeMonitor()
+        monitor = NodeMonitor(auto_discovery=False)
         start_time = monitor._get_process_start_time("/test_node", mock_proc)
 
         # Should use registry time, not psutil time
@@ -276,7 +276,7 @@ class TestRegistryStartTime(unittest.TestCase):
         mock_process.return_value = mock_proc
         
         # Create monitor and test start time retrieval
-        monitor = NodeMonitor()
+        monitor = NodeMonitor(auto_discovery=False)
         start_time = monitor._get_process_start_time("/test_node", mock_proc)
         
         # Should use psutil time as fallback
@@ -289,7 +289,7 @@ class TestKillProcess(unittest.TestCase):
     
     def setUp(self):
         """Set up test environment"""
-        self.monitor = NodeMonitor()
+        self.monitor = NodeMonitor(auto_discovery=False)
     
     @patch('psutil.Process')
     def test_kill_process_success(self, mock_process_class):
