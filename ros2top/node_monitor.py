@@ -7,8 +7,9 @@ import time
 import psutil
 from collections import defaultdict
 from typing import Dict, List, Optional, NamedTuple, Tuple
-from .ros2_utils import is_ros2_available, get_ros2_nodes_with_pids, check_ros2_environment
+from .ros2_utils import is_ros2_available, check_ros2_environment
 from .gpu_monitor import GPUMonitor
+from .graph_discovery import DiscoveryMode, DiscoveryStatus, GraphDiscovery
 from .node_registry import get_registered_nodes, get_registered_node_info
 
 
@@ -26,19 +27,28 @@ class NodeInfo(NamedTuple):
     # shared container: the cpu/ram/gpu figures above are whole-process values
     # that cannot be split per node, and are identical for each of them.
     shared_count: int = 1
+    # True when the node was found on the ROS graph rather than registering
+    # itself. Its PID was inferred from the DDS GUID, so it is a weaker claim
+    # than a registration and worth showing as such.
+    auto_discovered: bool = False
 
 
 class NodeMonitor:
     """Monitor registered processes and their resource usage (supports both ROS2 nodes and generic processes)"""
     
-    def __init__(self, refresh_interval: float = 5.0):
+    def __init__(self, refresh_interval: float = 5.0, auto_discovery: bool = True):
         self.refresh_interval = refresh_interval
         self.last_refresh = 0.0
         self.processes: Dict[str, psutil.Process] = {}
+        # Node names found on the graph rather than in the registry
+        self._auto_names: set = set()
+        self.discovery = GraphDiscovery() if auto_discovery else None
         # One sampler per PID, so a process hosting N nodes is measured once.
         # Keeping the same object across refreshes keeps cpu_percent()'s
         # interval baseline fresh.
         self._samplers: Dict[int, psutil.Process] = {}
+        # Command line per PID, cached alongside the samplers
+        self._cmdlines: Dict[int, str] = {}
         self.cores = psutil.cpu_count()
         self.gpu_monitor = GPUMonitor()
         
@@ -47,7 +57,8 @@ class NodeMonitor:
     
     def cleanup(self):
         """Cleanup resources"""
-        pass
+        if self.discovery is not None:
+            self.discovery.shutdown()
         
     def is_ros2_available(self) -> bool:
         """Check if ROS2 is available"""
@@ -89,29 +100,42 @@ class NodeMonitor:
             return False
     
     def _get_all_processes_to_monitor(self) -> List[Tuple[str, int]]:
-        """Get all processes to monitor (primarily from registry, optionally including ROS2 nodes)"""
+        """Get all processes to monitor, from the registry plus the ROS graph"""
         all_processes = []
-        
-        # Primary source: registered processes
+
+        # Primary source: nodes that registered themselves. These are
+        # authoritative -- they carry a real registration time and any custom
+        # metadata -- so they win over anything the graph infers.
         try:
-            registered_nodes = get_registered_nodes()
-            all_processes.extend(registered_nodes)
+            all_processes.extend(get_registered_nodes())
         except Exception:
             pass
-        
-        # Secondary source: ROS2 nodes (if available and not already in registry)
-        if self.ros2_available:
+
+        # Secondary source: the ROS graph, for nodes that never registered.
+        # Their PID is inferred from the DDS GUID, so track which ones came
+        # from here in order to mark them in the UI.
+        auto_names = set()
+        if self.discovery is not None:
             try:
-                ros2_nodes = get_ros2_nodes_with_pids()
-                # Only add ROS2 nodes that aren't already registered
-                registered_names = {name for name, pid in all_processes}
-                for name, pid in ros2_nodes:
-                    if name not in registered_names:
+                known = set(all_processes)
+                for name, pid in self.discovery.get_nodes_with_pids():
+                    if (name, pid) not in known:
                         all_processes.append((name, pid))
+                        auto_names.add((name, pid))
             except Exception:
                 pass
-            
+        self._auto_names = auto_names
+
         return all_processes
+
+    def get_discovery_status(self) -> DiscoveryStatus:
+        """How nodes are being found, for the UI to report"""
+        if self.discovery is None:
+            return DiscoveryStatus(
+                DiscoveryMode.MANUAL, 'disabled',
+                'auto-discovery is off (--no-auto-discovery). Nodes must '
+                'register with ros2top to appear.')
+        return self.discovery.status
     
     def _remove_dead_nodes(self, current_nodes: List[str]):
         """Remove processes for nodes that no longer exist"""
@@ -209,6 +233,7 @@ class NodeMonitor:
                     # already-running container, so it is younger than the process.
                     start_time=self._get_process_start_time(node_name, process),
                     shared_count=len(node_names),
+                    auto_discovered=(node_name, pid) in self._auto_names,
                 ))
 
         # Stable, process-grouped order. The UI selects and kills by row index
@@ -218,8 +243,30 @@ class NodeMonitor:
         # Within a process the oldest node comes first: composable nodes are
         # loaded into an already-running container, so the container's own node
         # is always the eldest and belongs at the head of its group.
-        node_infos.sort(key=lambda n: (n.pid, n.start_time, n.name or ""))
+        #
+        # That only works when each node has its own registration time.
+        # Auto-discovered nodes do not, so they all share the process create
+        # time and would fall back to alphabetical order, burying the
+        # container mid-group. Naming the process's own node in its command
+        # line breaks the tie first.
+        node_infos.sort(key=lambda n: (n.pid,
+                                       not self._named_in_cmdline(n.pid, n.name),
+                                       n.start_time,
+                                       n.name or ""))
         return node_infos
+
+    def _named_in_cmdline(self, pid: int, node_name: Optional[str]) -> bool:
+        """Whether a process's command line names this node (e.g. -r __node:=x)"""
+        if not node_name:
+            return False
+        cmdline = self._cmdlines.get(pid)
+        if cmdline is None:
+            try:
+                cmdline = ' '.join(self._samplers[pid].cmdline())
+            except Exception:
+                cmdline = ''
+            self._cmdlines[pid] = cmdline
+        return node_name.lstrip('/') in cmdline
 
     def _sampler(self, pid: int) -> psutil.Process:
         """Get the cached psutil.Process used to measure this PID"""
@@ -234,6 +281,7 @@ class NodeMonitor:
         """Drop samplers for PIDs we no longer monitor"""
         for pid in [p for p in self._samplers if p not in live_pids]:
             del self._samplers[pid]
+            self._cmdlines.pop(pid, None)
 
     def get_process_totals(self, node_infos: Optional[List[NodeInfo]] = None
                            ) -> Tuple[float, float, int]:
@@ -357,6 +405,8 @@ class NodeMonitor:
         """Clean shutdown of monitoring"""
         self.processes.clear()
         self._samplers.clear()
+        if self.discovery is not None:
+            self.discovery.shutdown()
         self.gpu_monitor.shutdown()
     
     def get_system_info(self) -> Dict[str, str]:

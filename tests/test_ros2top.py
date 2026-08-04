@@ -21,16 +21,17 @@ import psutil
 class TestROS2Utils(unittest.TestCase):
     """Test ROS2 utility functions"""
     
-    @patch('subprocess.run')
-    def test_is_ros2_available_success(self, mock_run):
+    @patch('ros2top.ros2_utils.shutil.which')
+    def test_is_ros2_available_success(self, mock_which):
         """Test ROS2 availability check when ROS2 is available"""
-        mock_run.return_value.returncode = 0
+        mock_which.return_value = '/opt/ros/jazzy/bin/ros2'
         self.assertTrue(is_ros2_available())
-    
-    @patch('subprocess.run')
-    def test_is_ros2_available_failure(self, mock_run):
+        mock_which.assert_called_once_with('ros2')
+
+    @patch('ros2top.ros2_utils.shutil.which')
+    def test_is_ros2_available_failure(self, mock_which):
         """Test ROS2 availability check when ROS2 is not available"""
-        mock_run.side_effect = FileNotFoundError()
+        mock_which.return_value = None
         self.assertFalse(is_ros2_available())
     
     @patch('ros2top.ros2_utils.get_registered_nodes')

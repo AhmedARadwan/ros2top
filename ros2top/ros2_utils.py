@@ -3,21 +3,17 @@
 Simplified ROS2 utilities using node registry as primary source
 """
 
-import subprocess
+import shutil
 from typing import List, Tuple, Optional, Dict
 from .node_registry import get_registered_nodes, cleanup_stale_registrations
 
 
 def is_ros2_available() -> bool:
     """Check if ROS2 is available in the environment"""
-    try:
-        result = subprocess.run(['ros2', '--help'], 
-                              capture_output=True, 
-                              text=True, 
-                              timeout=5)
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
+    # Looking the executable up on PATH rather than running `ros2 --help`:
+    # launching it costs over a second, which was being paid on every ros2top
+    # startup just to decide whether to print a tick in the status bar.
+    return shutil.which('ros2') is not None
 
 
 def get_ros2_nodes() -> List[str]:
@@ -63,11 +59,13 @@ def check_ros2_environment() -> Dict[str, str]:
     
     env_info = {}
     
-    # Check key ROS2 environment variables
+    # Check key ROS2 environment variables. RMW_IMPLEMENTATION is deliberately
+    # absent: it is unset whenever the default middleware is in use, which is
+    # the common case, so reading it here reports "Not set" and tells nobody
+    # anything. GraphDiscovery asks the middleware itself instead.
     ros_vars = [
         'ROS_DOMAIN_ID',
-        'ROS_LOCALHOST_ONLY', 
-        'RMW_IMPLEMENTATION',
+        'ROS_LOCALHOST_ONLY',
         'ROS_DISTRO'
     ]
     

@@ -19,6 +19,7 @@ def create_argument_parser():
 Examples:
     ros2top                    # Run with default settings
     ros2top --refresh 2        # Refresh every 2 seconds
+    ros2top --no-auto-discovery  # Only registered nodes
 
     Controls:
     q/Q - Quit
@@ -35,11 +36,18 @@ Examples:
     )
     
     parser.add_argument(
+        '--no-auto-discovery',
+        action='store_true',
+        help='Only show nodes that registered with ros2top, never those found '
+             'on the ROS graph'
+    )
+
+    parser.add_argument(
         '--version', '-v',
         action='version',
         version=f'%(prog)s {__version__}'
     )
-    
+
     return parser
 
 
@@ -76,7 +84,8 @@ def main():
     
     # Create node monitor
     try:
-        monitor = NodeMonitor(refresh_interval=args.refresh)
+        monitor = NodeMonitor(refresh_interval=args.refresh,
+                              auto_discovery=not args.no_auto_discovery)
     except Exception as e:
         show_error_message(f"Failed to initialize node monitor: {e}")
         sys.exit(1)

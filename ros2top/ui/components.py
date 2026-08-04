@@ -211,7 +211,11 @@ class Table(UIComponent):
         self.sort_column = 0
         self.sort_ascending = True
         self.selectable = True
-        
+        # Lines shown in place of the data rows when there are none. Without
+        # this an empty table is just a header, which tells the user nothing
+        # about why their nodes are missing.
+        self.empty_message: List[str] = []
+
         self._calculate_column_widths()
     
     def _calculate_column_widths(self):
@@ -339,10 +343,21 @@ class Table(UIComponent):
                 stdscr.addstr(current_row, self.rect.x, separator[:self.rect.width])
                 current_row += 1
             
+            # Nothing to list: explain why rather than leaving a bare header
+            if not self.rows and self.empty_message:
+                for line in self.empty_message:
+                    if current_row >= self.rect.bottom:
+                        break
+                    stdscr.addstr(current_row, self.rect.x + 2,
+                                  line[:max(0, self.rect.width - 3)])
+                    current_row += 1
+                self.dirty = False
+                return
+
             # Draw data rows
             visible_rows = self.rect.height - 2  # header + separator
             end_row = min(len(self.rows), self.scroll_offset + visible_rows)
-            
+
             for i in range(self.scroll_offset, end_row):
                 if current_row >= self.rect.bottom:
                     break

@@ -13,6 +13,8 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 - 🖥️ **Terminal-based interface** using curses
 - 🔄 **Auto-refresh** with configurable intervals
 - 🏷️ **Process tree awareness** (includes child processes)
+- 🛰️ **Automatic node discovery** from the ROS graph, with no code changes (on supported middleware)
+- 📦 **Component container aware** - composable nodes are grouped under the container hosting them
 - 📝 **Node registration API** for reliable node-to-monitor communication
 
 ## Installation
@@ -64,6 +66,7 @@ ros2top
 ```bash
 ros2top --help                # Show help
 ros2top --refresh 2          # Refresh every 2 seconds (default: 5)
+ros2top --no-auto-discovery  # Only show nodes that registered themselves
 ros2top --version           # Show version
 ```
 
@@ -124,9 +127,56 @@ ros2top --refresh 2
 
 ## How It Works
 
-1. **Node Registartion**: Every node registers its name and PID at startup with ros2top.
+1. **Node discovery**: ros2top finds nodes two ways - automatically from the ROS
+   graph, and from nodes that register themselves (see below).
 2. **Resource Monitoring**: Uses `psutil` for CPU/RAM and `pynvml` for GPU metrics.
 3. **Display**: Curses-based terminal interface for real-time updates.
+
+### Node discovery
+
+To show a node's resource usage, ros2top needs its **PID**, and the ROS graph
+does not publish that. Two mechanisms fill the gap:
+
+**Automatic (no code changes).** On middleware whose DDS GUID encodes the
+process id - Fast DDS, the ROS 2 default - ros2top recovers the node-to-PID
+mapping from the graph alone. Auto-discovered nodes are shown with a `~` prefix,
+because their PID is *inferred* rather than reported.
+
+**Registration (always works).** A node that calls `register_node()` states its
+PID directly. This is required on middleware that does not carry the PID, such
+as `rmw_zenoh_cpp` and Cyclone DDS, and it is more precise everywhere: registered
+nodes report their own start time and can attach custom metadata.
+
+The status bar shows the middleware in use and whether auto-discovery is
+working:
+
+```text
+ROS2✓ | RMW:fastrtps | Auto✓ | Nodes:4      # discovered automatically
+ROS2✓ | RMW:zenoh | Auto✗ register | Nodes:0  # registration required
+```
+
+If no nodes appear, ros2top explains why in the table area rather than showing
+an empty list. Use `--no-auto-discovery` to ignore the graph and show only
+registered nodes.
+
+### Composable nodes
+
+Nodes loaded into a component container all run in **one process**, so their
+CPU, RAM and GPU usage cannot be separated - the numbers belong to the process,
+not to any one node. ros2top shows the container heading its group with the
+usage figures listed once, and the nodes it hosts indented beneath it:
+
+```text
+PID      Uptime  %CPU  RAM(MB)  GPU#  %GPU  GMEM(MB)  Node Name
+3744993  10s     0.0   30.1     --    --    --        /my_container  (+2 nodes)
+         06s                                            - /talker
+         02s                                            - /listener
+3742958  02s     0.0   27.0     --    --    --        /standalone_talker
+```
+
+Uptime stays per node, since a node composed into an already-running container
+is younger than the process hosting it. Killing any node in a group ends the
+whole process, taking every node in it - the kill dialog warns before it does.
 
 ## Troubleshooting
 
@@ -137,9 +187,18 @@ ros2top --refresh 2
 
 ### Nodes not showing up
 
-- Verify nodes are running: `ros2 node list`
-- Check node info: `ros2 node info /your_node`
-- Some nodes might not have detectable PIDs
+First check the status bar. It names the middleware in use and whether
+auto-discovery is working.
+
+- `Auto✗ register` - your middleware does not expose node PIDs (Zenoh, Cyclone).
+  Nodes **must** call `register_node()` to appear. See the
+  [Python](examples/python/README.md) and [C++](examples/cpp/README.md) examples.
+- `Auto✓` but a node is missing - verify it is running with `ros2 node list`.
+  Nodes on other machines are skipped on purpose: their PID is meaningless
+  locally. A node is also skipped when its PID cannot be pinned down
+  unambiguously, since showing the wrong process is worse than showing none.
+- No status at all / `rclpy is not importable` - ROS 2 is not sourced, so the
+  graph cannot be read. Source your installation, or use registration.
 
 ## Development
 
@@ -174,6 +233,7 @@ ros2top/
 │   ├── main.py             # CLI entry point
 │   ├── node_monitor.py     # Core monitoring logic
 │   ├── node_registry.py    # Node registration system
+│   ├── graph_discovery.py  # Automatic node discovery from the ROS graph
 │   ├── gpu_monitor.py      # GPU monitoring
 │   ├── ros2_utils.py       # ROS2 utilities
 │   └── ui/                 # User interface components
