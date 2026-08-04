@@ -16,6 +16,12 @@ from .components import (
 from .layout import LayoutManager, ResponsiveLayout
 
 
+def _wrap(text: str, width: int) -> List[str]:
+    """Wrap a status reason onto the table area"""
+    import textwrap
+    return textwrap.wrap(text, width) or [""]
+
+
 class TerminalUI:
     """Enhanced terminal interface with responsive design"""
     
@@ -412,7 +418,15 @@ class TerminalUI:
             if section['height'] > 1:
                 ros2_status = "ROS2✓" if self.monitor.is_ros2_available() else "ROS2✗"
                 node_count = self.monitor.get_nodes_count()
-                status_info = f"{ros2_status} | Nodes:{node_count} | +/-:Speed | Space:Update"
+                # Name the middleware and whether it lets us find nodes on our
+                # own, so "no nodes" is never a mystery
+                discovery = self.monitor.get_discovery_status()
+                auto = "Auto✓" if discovery.is_auto else "Auto✗ register"
+                # Only claim to know the middleware when we actually asked it
+                rmw = (f"RMW:{discovery.short_rmw} | "
+                       if discovery.short_rmw not in ('disabled', 'unknown') else "")
+                status_info = (f"{ros2_status} | {rmw}{auto} "
+                               f"| Nodes:{node_count} | +/-:Speed | Space:Update")
                 self._addstr_with_color(section['start_y'] + 1, 0, status_info[:section['width']], 4)
                 
         except curses.error:
@@ -478,6 +492,29 @@ class TerminalUI:
         except curses.error:
             pass
     
+    def _empty_table_message(self) -> List[str]:
+        """Explain an empty table, since 'no nodes' has several causes"""
+        status = self.monitor.get_discovery_status()
+        if status.is_auto:
+            return [
+                "",
+                "No ROS 2 nodes are running.",
+                "",
+                f"Nodes are being discovered automatically via {status.short_rmw}.",
+            ]
+
+        return [
+            "",
+            "No nodes found.",
+            "",
+        ] + [f"  {line}" for line in _wrap(status.reason, 66)] + [
+            "",
+            "  Register nodes to make them visible:",
+            "",
+            '    C++     ros2top::register_node("/my_node");',
+            "    Python  ros2top.register_node('/my_node')",
+        ]
+
     def _update_nodes_table(self):
         """Update nodes table data with specified format"""
         if not self.nodes_table:
@@ -512,8 +549,12 @@ class TerminalUI:
             else:
                 prefix = ""
 
-            # Get node name - use full available width
+            # Get node name - use full available width. Auto-discovered nodes
+            # are marked: their PID was inferred from the DDS GUID rather than
+            # reported by the node itself, which is a weaker claim.
             node_name = node.name if node.name else "unknown"
+            if node.auto_discovered:
+                node_name = f"~{node_name}"
             # A container's row says how many nodes it is hosting, so the group
             # is still obvious when it scrolls past the top of the table
             suffix = f"  (+{node.shared_count - 1} nodes)" if grouped and first_of_group else ""
@@ -552,6 +593,7 @@ class TerminalUI:
 
             rows.append(row)
 
+        self.nodes_table.empty_message = self._empty_table_message()
         self.nodes_table.set_data(rows)
         
         # Sync selection state with table component
@@ -638,6 +680,14 @@ class TerminalUI:
             "  • Real-time CPU, memory, and GPU monitoring",
             "  • Automatic node discovery via registry",
             "  • Color-coded usage indicators",
+            "",
+            "Node Discovery:",
+            "  ~name    - Found on the ROS graph, not registered. Its PID",
+            "             was inferred from the DDS GUID, so it is a weaker",
+            "             claim than a node that identified itself.",
+            "             The status bar shows the middleware in use and",
+            "             whether auto-discovery works with it. When it does",
+            "             not, nodes must call register_node() to appear.",
             "",
             "Component Containers:",
             "  -        - Nodes indented under a container run inside that",
