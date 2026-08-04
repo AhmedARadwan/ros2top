@@ -37,6 +37,9 @@ A complete example of a ROS2 node that registers itself with ros2top for monitor
    ```bash
    # In another terminal, run ros2top to see the registered node
    ros2top
+
+   # or, equivalently, as a ros2 CLI sub-command
+   ros2 top
    ```
 
 **What you'll see:**

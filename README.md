@@ -13,6 +13,7 @@ A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop`
 - 🖥️ **Terminal-based interface** using curses
 - 🔄 **Auto-refresh** with configurable intervals
 - 🏷️ **Process tree awareness** (includes child processes)
+- 🔌 **`ros2 top` integration** - available as a ros2 CLI sub-command
 - 🛰️ **Automatic node discovery** from the ROS graph, with no code changes (on supported middleware)
 - 📦 **Component container aware** - composable nodes are grouped under the container hosting them
 - 📝 **Node registration API** for reliable node-to-monitor communication
@@ -57,9 +58,16 @@ pip install -e .
 ### Basic Usage
 
 ```bash
-# Run ros2top
+# Run standalone
 ros2top
+
+# Or as a ros2 CLI sub-command, wherever ROS 2 is installed
+ros2 top
 ```
+
+Both are the same program: `ros2top` registers itself with `ros2cli` through an
+entry point, so `ros2 top` appears in `ros2 --help` with no changes to ros2cli.
+Every option below works with either form.
 
 ### Command Line Options
 
@@ -68,6 +76,8 @@ ros2top --help                # Show help
 ros2top --refresh 2          # Refresh every 2 seconds (default: 5)
 ros2top --no-auto-discovery  # Only show nodes that registered themselves
 ros2top --version           # Show version
+
+ros2 top --refresh 2         # identical, via the ros2 CLI
 ```
 
 ### Interactive Controls
@@ -123,6 +133,8 @@ The top panel shows real-time system information:
 
 ```bash
 ros2top --refresh 2
+# or
+ros2 top --refresh 2
 ```
 
 ## How It Works
@@ -234,6 +246,8 @@ ros2top/
 │   ├── node_monitor.py     # Core monitoring logic
 │   ├── node_registry.py    # Node registration system
 │   ├── graph_discovery.py  # Automatic node discovery from the ROS graph
+│   ├── command/            # ros2cli plugin exposing `ros2 top`
+│   │   └── top.py
 │   ├── gpu_monitor.py      # GPU monitoring
 │   ├── ros2_utils.py       # ROS2 utilities
 │   └── ui/                 # User interface components

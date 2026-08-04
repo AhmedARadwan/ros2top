@@ -36,6 +36,11 @@ dependencies = [
 [project.scripts]
 ros2top = "ros2top.main:main"
 
+# Makes the same monitor available as `ros2 top` wherever ros2cli is installed.
+# ros2cli finds it by entry point, so nothing in ros2cli has to change.
+[project.entry-points."ros2cli.command"]
+top = "ros2top.command.top:TopCommand"
+
 [project.urls]
 Homepage = "https://github.com/AhmedARadwan/ros2top"
 "Bug Reports" = "https://github.com/AhmedARadwan/ros2top/issues"

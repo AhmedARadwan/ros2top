@@ -49,6 +49,9 @@ See the [package README](example_monitored_node/README.md) for detailed usage in
 
    ```bash
    ros2top
+
+   # or, equivalently, as a ros2 CLI sub-command
+   ros2 top
    ```
 
 ## C++ API Overview

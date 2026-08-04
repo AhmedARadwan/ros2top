@@ -47,6 +47,7 @@ _PID = slice(4, 6)
 
 
 class DiscoveryMode(Enum):
+    STARTING = 'starting'  # still joining the graph; no verdict yet
     AUTO = 'auto'       # the graph gives us node -> PID, no registration needed
     MANUAL = 'manual'   # nodes must register themselves to be seen
 
@@ -59,6 +60,11 @@ class DiscoveryStatus(NamedTuple):
     @property
     def is_auto(self) -> bool:
         return self.mode is DiscoveryMode.AUTO
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether discovery has decided. False only during the first moments."""
+        return self.mode is not DiscoveryMode.STARTING
 
     @property
     def short_rmw(self) -> str:
@@ -193,8 +199,10 @@ class GraphDiscovery:
         self._period = period
         self._lock = threading.Lock()
         self._nodes: List[Tuple[str, int]] = []
+        # Shown for the second or so before the graph is reachable, so it has
+        # to read as progress rather than as a verdict.
         self._status = DiscoveryStatus(
-            DiscoveryMode.MANUAL, 'unknown', 'discovery has not started yet')
+            DiscoveryMode.STARTING, 'unknown', 'Looking for nodes...')
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._context = None

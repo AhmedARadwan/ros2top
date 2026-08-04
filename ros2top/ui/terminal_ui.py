@@ -421,7 +421,12 @@ class TerminalUI:
                 # Name the middleware and whether it lets us find nodes on our
                 # own, so "no nodes" is never a mystery
                 discovery = self.monitor.get_discovery_status()
-                auto = "Auto✓" if discovery.is_auto else "Auto✗ register"
+                if not discovery.is_settled:
+                    auto = "Auto…"          # no verdict yet, do not claim one
+                elif discovery.is_auto:
+                    auto = "Auto✓"
+                else:
+                    auto = "Auto✗ register"
                 # Only claim to know the middleware when we actually asked it
                 rmw = (f"RMW:{discovery.short_rmw} | "
                        if discovery.short_rmw not in ('disabled', 'unknown') else "")
@@ -495,6 +500,11 @@ class TerminalUI:
     def _empty_table_message(self) -> List[str]:
         """Explain an empty table, since 'no nodes' has several causes"""
         status = self.monitor.get_discovery_status()
+        if not status.is_settled:
+            # Still joining the graph. Telling people to register nodes before
+            # we have even looked would be advice we might retract a second later.
+            return ["", status.reason]
+
         if status.is_auto:
             return [
                 "",
@@ -655,7 +665,7 @@ class TerminalUI:
         height, width = self.stdscr.getmaxyx()
         
         help_lines = [
-            "ros2top Enhanced Terminal UI",
+            "ros2top Enhanced Terminal UI  (also: ros2 top)",
             "",
             "Global Controls:",
             "  q/Q      - Quit application",

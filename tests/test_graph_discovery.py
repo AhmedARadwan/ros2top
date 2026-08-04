@@ -119,6 +119,19 @@ def test_short_rmw_names():
     print('OK: RMW names shortened for the status bar')
 
 
+def test_starting_state_makes_no_claim():
+    """Before the graph is reachable ros2top must not advise registering nodes."""
+    from ros2top.graph_discovery import DiscoveryStatus
+
+    starting = DiscoveryStatus(DiscoveryMode.STARTING, 'unknown', 'Looking for nodes...')
+    assert not starting.is_settled, 'startup reported as a verdict'
+    assert not starting.is_auto
+
+    for mode in (DiscoveryMode.AUTO, DiscoveryMode.MANUAL):
+        assert DiscoveryStatus(mode, 'rmw_x', '').is_settled, mode
+    print('OK: startup state is distinct from a verdict')
+
+
 def test_placeholder_and_internal_nodes_are_not_reported():
     """rmw emits sentinels for endpoints it has not matched yet; they are not nodes."""
     from ros2top.graph_discovery import _is_reportable
@@ -198,6 +211,7 @@ if __name__ == '__main__':
     test_unknown_pid_reports_nothing()
     test_degrades_without_rclpy()
     test_short_rmw_names()
+    test_starting_state_makes_no_claim()
     test_placeholder_and_internal_nodes_are_not_reported()
     test_registry_wins_over_graph()
     test_container_heads_group_without_registration_times()
