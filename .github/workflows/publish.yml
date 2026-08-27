@@ -13,7 +13,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.x'
     
@@ -33,9 +33,39 @@ jobs:
         # Set package version to match the tag version
         sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" ros2top/__init__.py
         
+    # PyPI renders README.md as the project description and cannot resolve
+    # repository-relative paths, but GitHub needs them relative to render on
+    # any branch or fork. Keep the file GitHub-correct and rewrite for the
+    # package here.
+    - name: Absolutise README asset links for PyPI
+      run: |
+        python - <<'PY'
+        import re, pathlib
+        raw = "https://raw.githubusercontent.com/AhmedARadwan/ros2top/dev/"
+        p = pathlib.Path("README.md")
+        text = p.read_text()
+        # Both spellings: Markdown ![alt](assets/x) and any raw <img src="assets/x">
+        text, n1 = re.subn(r'\]\((assets/[^)]+)\)', rf']({raw}\1)', text)
+        rewritten, n2 = re.subn(r'src="(assets/[^"]+)"', rf'src="{raw}\1"', text)
+        count = n1 + n2
+        p.write_text(rewritten)
+        print(f"rewrote {count} asset link(s) for the PyPI description")
+        assert count, "no asset links found - has the README changed?"
+        PY
+
     - name: Build package
       run: python -m build
-    
+
+    # A PyPI upload cannot be replaced, and a project description that fails to
+    # render cannot be fixed without burning a version number. Check before
+    # uploading, not after.
+    - name: Check the built artifacts
+      run: |
+        twine check dist/*
+        python -m pip install dist/*.whl
+        ros2top --version
+        test "$(ros2top --version)" = "ros2top $VERSION"
+
     - name: Publish to PyPI
       env:
         TWINE_USERNAME: __token__

@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel"]
+# setuptools 64 is the first release with the PEP 660 build_editable
+# hook. Below that, `pip install -e .` fails outright on a project
+# with no setup.py -- which is what the documented source install does.
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,13 +11,17 @@ dynamic = ["version"]
 description = "A real-time process monitor with support for ROS2 nodes, showing CPU, RAM, and GPU usage"
 readme = "README.md"
 requires-python = ">=3.8"
-license = "MIT"
+# The PEP 639 expression form (license = "MIT") needs setuptools >= 77, which
+# dropped Python 3.8 -- and this project still supports 3.8. This form is
+# understood by every setuptools from 61 up.
+license = { text = "MIT" }
 authors = [
   { name = "Ahmed Radwan", email = "ahmed.ali.radwan94@gmail.com" },
 ]
 keywords = ["monitoring", "process", "ros2", "gpu", "cpu", "memory", "nodes", "system"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
   "Operating System :: OS Independent",
@@ -24,6 +31,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: System :: Monitoring",
   "Topic :: System :: Systems Administration",
   "Topic :: Software Development :: Libraries :: Python Modules",

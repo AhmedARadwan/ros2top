@@ -17,6 +17,8 @@ Examples:
     ros2top                      # Run with default settings
     ros2top --refresh 2          # Refresh every 2 seconds
     ros2top --no-auto-discovery  # Only registered nodes
+    ros2top --doctor             # Explain why nodes are or aren't showing up
+    ros2top --cmake-dir          # Print the path find_package(ros2top) needs
 
     Also available as a ros2 CLI sub-command:
     ros2 top                     # identical to `ros2top`
@@ -47,6 +49,27 @@ def add_arguments(parser):
         action='store_true',
         help='Only show nodes that registered with ros2top, never those found '
              'on the ROS graph'
+    )
+
+    parser.add_argument(
+        '--doctor',
+        action='store_true',
+        help='Print a diagnostic report explaining what ros2top can and cannot '
+             'see, then exit. Paste it into a bug report.'
+    )
+
+    parser.add_argument(
+        '--cmake-dir',
+        action='store_true',
+        help='Print the directory holding ros2topConfig.cmake, for '
+             'colcon build --cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)'
+    )
+
+    parser.add_argument(
+        '--include-dir',
+        action='store_true',
+        help="Print the directory holding ros2top's C++ header, for compilers "
+             'invoked without CMake'
     )
 
     parser.add_argument(
@@ -85,6 +108,31 @@ def check_requirements():
     return True
 
 
+def _print_path(args) -> int:
+    """
+    Print an integration path for --cmake-dir / --include-dir.
+
+    Prints the bare path and nothing else, so it can be used directly in a
+    command substitution. Failures go to stderr with a non-zero exit, so a
+    shell using it does not silently substitute an empty string.
+    """
+    from . import paths
+
+    if getattr(args, 'cmake_dir', False):
+        path, what = paths.cmake_dir(), 'ros2topConfig.cmake'
+    else:
+        path, what = paths.include_dir(), 'ros2top/ros2top.hpp'
+
+    if path is None:
+        print(f'ros2top: could not locate {what}. Install the wheel with '
+              f'`pip install ros2top`, or run this from a source checkout.',
+              file=sys.stderr)
+        return 1
+
+    print(path)
+    return 0
+
+
 def run(args) -> int:
     """
     Run the monitor with already-parsed arguments, returning an exit code.
@@ -92,6 +140,16 @@ def run(args) -> int:
     Returns rather than exits so the ros2cli plugin can hand the code back to
     ros2cli instead of tearing the process down from underneath it.
     """
+    # Flags that print something and exit. Handled before check_requirements()
+    # so that `--doctor` still works on a system where curses is the problem,
+    # and before the UI so nothing tries to take over the terminal.
+    if getattr(args, 'cmake_dir', False) or getattr(args, 'include_dir', False):
+        return _print_path(args)
+
+    if getattr(args, 'doctor', False):
+        from .doctor import run as run_doctor
+        return run_doctor()
+
     # Check requirements
     if not check_requirements():
         return 1

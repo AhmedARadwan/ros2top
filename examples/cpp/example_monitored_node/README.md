@@ -34,7 +34,7 @@ A complete example of a ROS2 C++ node that registers itself with ros2top for mon
 2. **Copy the package**:
 
    ```bash
-   cp -r /home/radwan/ros2top/examples/cpp/example_monitored_node .
+   cp -r <your ros2top checkout>/examples/cpp/example_monitored_node .
    ```
 
 3. **Build the package**:

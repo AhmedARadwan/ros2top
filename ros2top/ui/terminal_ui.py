@@ -432,7 +432,19 @@ class TerminalUI:
                        if discovery.short_rmw not in ('disabled', 'unknown') else "")
                 status_info = (f"{ros2_status} | {rmw}{auto} "
                                f"| Nodes:{node_count} | +/-:Speed | Space:Update")
-                self._addstr_with_color(section['start_y'] + 1, 0, status_info[:section['width']], 4)
+                # Colour by what the line actually says. This was hardcoded to
+                # the red "Error/High usage" pair, so a healthy
+                # "ROS2 ok | Auto ok" read as a failure.
+                if not self.monitor.is_ros2_available():
+                    status_color = 4       # red: ROS 2 is not there at all
+                elif not discovery.is_settled:
+                    status_color = 3       # yellow: still deciding
+                elif discovery.is_auto:
+                    status_color = 1       # cyan: everything working
+                else:
+                    status_color = 3       # yellow: registration required
+                self._addstr_with_color(section['start_y'] + 1, 0,
+                                        status_info[:section['width']], status_color)
                 
         except curses.error:
             pass

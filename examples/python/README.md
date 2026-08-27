@@ -26,7 +26,7 @@ A complete example of a ROS2 node that registers itself with ros2top for monitor
 
    ```bash
    # Navigate to the examples directory
-   cd /home/radwan/ros2top/examples/python
+   cd <your ros2top checkout>/examples/python
    
    # Run the example node
    python3 example_node.py

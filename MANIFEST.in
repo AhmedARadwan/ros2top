@@ -1,4 +1,6 @@
 include README.md
+include CHANGELOG.md
+recursive-include assets *.svg
 include LICENSE
 include requirements.txt
 recursive-include ros2top *.py
