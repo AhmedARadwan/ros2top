@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: unit tests (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.8', '3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pytest
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+  cpp-integration:
+    # The C++ API is header-only and writes the registry that the Python side
+    # reads, so nothing but a real build against a real ROS 2 install proves it
+    # works. Two regressions shipped for want of this job: the example stopped
+    # compiling when heartbeat() lost its return value, and registration threw
+    # at runtime because the documented JSON metadata could not convert to the
+    # parameter type.
+    name: C++ example on ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.distro }}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy, kilted, rolling]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies and ros2top
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            python3-pip nlohmann-json3-dev
+
+          # The four images do not agree on how pip may be used.
+          #
+          # Jazzy, Kilted and Rolling mark the interpreter externally managed
+          # (PEP 668), so installs need --break-system-packages; their distro
+          # pip is 24+, which reads PEP 621 metadata correctly, so it needs no
+          # upgrade. Upgrading it in fact fails outright - Debian's pip has no
+          # RECORD file, so it cannot be uninstalled.
+          #
+          # Humble is the reverse: no PEP 668 marker, but pip 22.0.2, whose
+          # build isolation lets the system setuptools 59.6 shadow it. That
+          # setuptools predates PEP 621, so `pip install .` silently produces
+          # an empty UNKNOWN-0.0.0 package. There, the upgrade is required.
+          if python3 -m pip install --help | grep -q break-system-packages; then
+            PIP="python3 -m pip install --break-system-packages"
+          else
+            PIP="python3 -m pip install"
+            $PIP --upgrade pip
+          fi
+          $PIP .
+          ros2top --version
+
+      - name: Build the C++ example
+        shell: bash
+        run: |
+          . /opt/ros/$ROS_DISTRO/setup.sh
+          mkdir -p /tmp/ws/src
+          cp -r examples/cpp/example_monitored_node /tmp/ws/src/
+          cd /tmp/ws
+          colcon build --packages-select example_monitored_node \
+            --cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)
+
+      - name: Registration works at runtime
+        shell: bash
+        run: |
+          . /opt/ros/$ROS_DISTRO/setup.sh
+          . /tmp/ws/install/setup.sh
+          rm -rf ~/.ros2top
+          ros2 run example_monitored_node example_monitored_node \
+            --ros-args -r __node:=ci_node > /tmp/node.log 2>&1 &
+          sleep 8
+          echo "--- node log ---"; cat /tmp/node.log | tr -d '\0' | head -20
+          echo "--- registry ---"; cat ~/.ros2top/registry/nodes.json
+          python3 - <<'PY'
+          import json, os, sys
+          path = os.path.expanduser('~/.ros2top/registry/nodes.json')
+          entries = json.load(open(path))
+          assert entries, 'the C++ node did not register'
+          for key, entry in entries.items():
+              assert entry['node_name'] == '/ci_node', entry
+              assert key.split(':')[0].isdigit(), f'key not pid-prefixed: {key!r}'
+              assert '\x00' not in entry['process_name'], entry['process_name']
+              assert entry['cmdline'], 'cmdline was not recorded'
+              # The metadata the example passes contains arrays; storing it used
+              # to throw and abandon the registration.
+              assert isinstance(entry['additional_info']['topics_published'], list)
+          print('registration verified:', list(entries))
+          PY
+
+      - name: Doctor report
+        shell: bash
+        run: |
+          . /opt/ros/$ROS_DISTRO/setup.sh
+          ros2top --doctor
+
+      - name: "`ros2 top` is registered with the ros2 CLI"
+        shell: bash
+        run: |
+          . /opt/ros/$ROS_DISTRO/setup.sh
+          # Anchored on a trailing space: '^\s+top' also matches 'topic',
+          # so the check would pass with the plugin broken.
+          ros2 --help | grep -E '^[[:space:]]+top[[:space:]]'

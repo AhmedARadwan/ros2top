@@ -19,8 +19,8 @@ See the [package README](example_monitored_node/README.md) for detailed usage in
 
 1. **Prerequisites**:
 
-   - ROS2 (Humble, Iron, or Rolling)
-   - ros2top installed: `pip install -e /home/radwan/ros2top`
+   - ROS 2 Humble, Jazzy, Kilted or Rolling
+   - ros2top installed: `pip install ros2top`
    - Build tools: `sudo apt install build-essential cmake`
    - nlohmann_json: `sudo apt install nlohmann-json3-dev`
 
@@ -31,12 +31,23 @@ See the [package README](example_monitored_node/README.md) for detailed usage in
    mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
 
    # Copy or link the example package
-   ln -s /home/radwan/ros2top/examples/cpp/example_monitored_node .
+   git clone https://github.com/AhmedARadwan/ros2top.git /tmp/ros2top
+   ln -s /tmp/ros2top/examples/cpp/example_monitored_node .
 
-   # Build
+   # Build. ros2top ships as a pip package, so its CMake config is not on
+   # CMake's default search path unless it was installed system-wide --
+   # `ros2top --cmake-dir` reports where it actually is.
    cd ~/ros2_ws
-   colcon build --packages-select example_monitored_node
+   colcon build --packages-select example_monitored_node \
+       --cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)
    source install/setup.bash
+   ```
+
+   If `find_package(ros2top)` fails, that flag is the fix. Alternatively put
+   the prefix on `CMAKE_PREFIX_PATH` once:
+
+   ```bash
+   export CMAKE_PREFIX_PATH="$(dirname $(dirname $(ros2top --cmake-dir))):$CMAKE_PREFIX_PATH"
    ```
 
 3. **Run the example**:
@@ -56,27 +67,51 @@ See the [package README](example_monitored_node/README.md) for detailed usage in
 
 ## C++ API Overview
 
-The ros2top C++ API is defined in `/home/radwan/ros2top/include/ros2top/ros2top.hpp` and provides:
+The API is header-only. Install ros2top, then include it:
+
+```cpp
+#include <ros2top/ros2top.hpp>
+```
+
+`ros2top --include-dir` prints the include path if you are driving the compiler
+yourself rather than through CMake.
 
 ### Core Functions
 
 ```cpp
 namespace ros2top {
-    // Register a node with monitoring information
-    bool register_node(const std::string& node_name, const nlohmann::json& node_info);
+    // Register a node. additional_info is any JSON object; values may be
+    // strings, numbers or arrays. Returns false if the registry cannot be
+    // written -- it never throws.
+    bool register_node(const std::string& node_name,
+                       const nlohmann::json& additional_info = {});
 
-    // Send a heartbeat to maintain registration
+    // Refresh the node's last_seen timestamp. False means the node is not
+    // registered, or the registry could not be written.
     bool heartbeat(const std::string& node_name);
 
-    // Unregister a node from monitoring
+    // Remove the node from the registry. Unregistering a node that was never
+    // registered succeeds: the requested state already holds.
     bool unregister_node(const std::string& node_name);
-
-    // Get information about registered nodes
-    nlohmann::json get_registered_nodes();
-
-    // Check if a specific node is registered
-    bool is_node_registered(const std::string& node_name);
 }
+```
+
+All three are safe to call from any thread and never throw: writers in both
+languages exclude each other with a lock file, and a lock left behind by a
+crashed process is detected and cleared rather than blocking forever.
+
+### RAII registration
+
+`AutoNodeRegistrar` registers on construction and unregisters on destruction,
+so a node cannot leak a registration by returning early or throwing:
+
+```cpp
+class MyNode : public rclcpp::Node {
+public:
+    MyNode() : Node("my_node"), registrar_(this->get_name(), {{"version", "1.0.0"}}) {}
+private:
+    ros2top::AutoNodeRegistrar registrar_;
+};
 ```
 
 ### Usage Pattern
@@ -118,8 +153,9 @@ private:
 When adding ros2top to your C++ ROS2 package:
 
 - [ ] Add `nlohmann_json` dependency to `package.xml`
-- [ ] Include ros2top headers in `CMakeLists.txt`
-- [ ] Link `nlohmann_json` in `CMakeLists.txt`
+- [ ] `find_package(ros2top REQUIRED)` in `CMakeLists.txt`
+- [ ] `target_link_libraries(<target> ros2top::ros2top)` - this carries the
+      include path, the C++17 requirement and nlohmann_json with it
 - [ ] Include `ros2top/ros2top.hpp` in your source
 - [ ] Register node in constructor with metadata
 - [ ] Set up periodic heartbeat timer
@@ -130,15 +166,18 @@ When adding ros2top to your C++ ROS2 package:
 
 **Build Issues:**
 
-- Ensure `nlohmann-json3-dev` is installed
-- Check that ros2top include path is correct
-- Verify ROS2 environment is sourced
+- `Could not find a package configuration file provided by "ros2top"` - pass
+  `--cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)`, as above.
+- `nlohmann/json.hpp: No such file or directory` - `sudo apt install nlohmann-json3-dev`
+- Verify the ROS 2 environment is sourced
 
 **Runtime Issues:**
 
-- Check file permissions for registry directory
-- Ensure ros2top Python package is installed
-- Verify node name doesn't conflict with existing registrations
+Run `ros2top --doctor`. It reports every registry entry, whether the process
+behind it is alive, and why an entry would not be listed - which covers the
+usual causes: a registry directory owned by root, nodes in a different PID
+namespace (a container without `--pid=host`), or a middleware that does not
+expose PIDs.
 
 **Integration Issues:**
 

@@ -82,9 +82,19 @@ pip install -e .
 - `psutil>=5.8.0`
 - `pynvml>=11.0.0`
 
-### CPP Dependencies
+### C++ Dependencies
 
-- [nlohmann json](https://github.com/nlohmann/json) installed from source.
+- [nlohmann/json](https://github.com/nlohmann/json) - `sudo apt install nlohmann-json3-dev`
+
+ros2top ships as a Python wheel, so its CMake config is installed wherever pip
+put it, which is not usually on CMake's search path. `ros2top --cmake-dir`
+reports the location:
+
+```bash
+colcon build --cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)
+```
+
+See the [C++ example](examples/cpp/README.md) for a complete package.
 
 ## Usage
 
@@ -111,11 +121,21 @@ Every option below works with either form.
 
 ```bash
 ros2top --help                # Show help
-ros2top --refresh 2          # Refresh every 2 seconds (default: 5)
-ros2top --no-auto-discovery  # Only show nodes that registered themselves
-ros2top --version           # Show version
+ros2top --refresh 2           # Refresh every 2 seconds (default: 0.1)
+ros2top --no-auto-discovery   # Only show nodes that registered themselves
+ros2top --doctor              # Diagnose why nodes are or aren't showing up
+ros2top --cmake-dir           # Print the path find_package(ros2top) needs
+ros2top --include-dir         # Print the C++ include path
+ros2top --version             # Show version
 
-ros2 top --refresh 2         # identical, via the ros2 CLI
+ros2 top --refresh 2          # identical, via the ros2 CLI
+```
+
+If `ros2top` is not on your PATH after installing (`pip install --user` puts it
+in `~/.local/bin`, which some shells do not add), run it as a module instead:
+
+```bash
+python3 -m ros2top
 ```
 
 ### Interactive Controls
@@ -230,10 +250,51 @@ whole process, taking every node in it - the kill dialog warns before it does.
 
 ## Troubleshooting
 
+### Start here: `ros2top --doctor`
+
+It prints what ros2top can and cannot see - the middleware in use, whether
+auto-discovery works, every registry entry with the liveness of the process
+behind it, the C++ integration paths, and GPU status. Most "no nodes appear"
+reports are answered by it directly, and it is designed to be pasted into a bug
+report.
+
+### `ros2top: command not found` after installing
+
+The console script is installed next to your Python, and that directory is not
+always on PATH - `pip install --user` uses `~/.local/bin`. Either add it:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+or skip PATH entirely with `python3 -m ros2top`.
+
+### `ModuleNotFoundError` from a path inside a colcon workspace
+
+If the traceback names a file under `<workspace>/install/ros2top/...`, a stale
+colcon install of ros2top is shadowing the pip package, and it is that copy -
+not the installed one - that is failing to import. Remove it and re-source:
+
+```bash
+rm -rf <workspace>/install/ros2top <workspace>/build/ros2top
+source /opt/ros/$ROS_DISTRO/setup.bash
+```
+
+### `find_package(ros2top)` fails in colcon
+
+CMake only searches a few system prefixes, and pip rarely installs into one of
+them. Point CMake at the real location:
+
+```bash
+colcon build --cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)
+```
+
 ### No GPU monitoring
 
 - Install NVIDIA drivers
 - Install pynvml: `pip install pynvml`
+- On Jetson this is expected: NVML does not support the integrated GPU, so the
+  GPU columns read `--`. See [#2](https://github.com/AhmedARadwan/ros2top/issues/2).
 
 ### `pip install` succeeded but `ros2top` is missing
 

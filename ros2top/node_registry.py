@@ -290,29 +290,70 @@ def get_registry_info() -> Dict[str, str]:
 
 
 # Internal helper functions
+def _lock_owner() -> Optional[int]:
+    """PID recorded in the lock file, or None if it cannot be read"""
+    try:
+        with open(LOCK_FILE) as f:
+            return int(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _steal_stale_lock() -> bool:
+    """
+    Remove a lock file whose owning process no longer exists.
+
+    The lock is a plain file, so a writer that is killed while holding it never
+    cleans up, and every later registration - from any process, in either
+    language - then fails forever. A lock owned by a dead PID cannot be
+    protecting anything, so it is safe to drop.
+
+    Returns True if a stale lock was removed, i.e. it is worth retrying.
+    """
+    owner = _lock_owner()
+    if owner is None:
+        # Either mid-write by a live process, or truncated. Waiting is correct:
+        # a genuinely broken file is caught by the caller's timeout.
+        return False
+    if psutil.pid_exists(owner):
+        return False
+    try:
+        os.remove(LOCK_FILE)
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_lock(timeout: float = 1.0) -> bool:
+    """
+    Take the registry lock, or return False after `timeout` seconds.
+
+    Uses exclusive file creation, which the C++ header does too, so writers in
+    either language exclude each other.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with open(LOCK_FILE, 'x') as lock_file:
+                lock_file.write(str(os.getpid()))
+            return True
+        except FileExistsError:
+            if _steal_stale_lock():
+                continue        # retry immediately; the holder is dead
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        except OSError:
+            return False
+
+
 def _write_node_registration(node_data: Dict) -> bool:
     """Write node registration to file with file locking"""
     
     try:
         _ensure_registry_dir()
         
-        # Create a lock file approach compatible with C++
-        lock_acquired = False
-        max_attempts = 100  # 1 second timeout
-        
-        for _ in range(max_attempts):
-            try:
-                # Try to create lock file exclusively
-                with open(LOCK_FILE, 'x') as lock_file:
-                    lock_file.write(str(os.getpid()))
-                    lock_acquired = True
-                    break
-            except FileExistsError:
-                # Lock file exists, wait and retry
-                time.sleep(0.01)
-                continue
-        
-        if not lock_acquired:
+        if not _acquire_lock():
             return False
         
         try:
@@ -359,29 +400,12 @@ def _write_node_registration(node_data: Dict) -> bool:
 
 def _remove_node_registration(node_name: str) -> bool:
     """Remove node registration from file with file locking"""
-    import shutil
     
     try:
         if not os.path.exists(REGISTRATION_FILE):
             return True
         
-        # Create a lock file approach compatible with C++
-        lock_acquired = False
-        max_attempts = 100  # 1 second timeout
-        
-        for _ in range(max_attempts):
-            try:
-                # Try to create lock file exclusively
-                with open(LOCK_FILE, 'x') as lock_file:
-                    lock_file.write(str(os.getpid()))
-                    lock_acquired = True
-                    break
-            except FileExistsError:
-                # Lock file exists, wait and retry
-                time.sleep(0.01)
-                continue
-        
-        if not lock_acquired:
+        if not _acquire_lock():
             return False
         
         try:
@@ -428,29 +452,12 @@ def _remove_node_registration(node_name: str) -> bool:
 
 def _update_node_heartbeat(node_name: str) -> bool:
     """Update the last_seen timestamp for a node with file locking"""
-    import shutil
     
     try:
         if not os.path.exists(REGISTRATION_FILE):
             return False
         
-        # Create a lock file approach compatible with C++
-        lock_acquired = False
-        max_attempts = 100  # 1 second timeout
-        
-        for _ in range(max_attempts):
-            try:
-                # Try to create lock file exclusively
-                with open(LOCK_FILE, 'x') as lock_file:
-                    lock_file.write(str(os.getpid()))
-                    lock_acquired = True
-                    break
-            except FileExistsError:
-                # Lock file exists, wait and retry
-                time.sleep(0.01)
-                continue
-        
-        if not lock_acquired:
+        if not _acquire_lock():
             return False
         
         try:
@@ -509,23 +516,7 @@ def _remove_node_registration_by_pid(pid: Optional[int], key: str = None) -> boo
         if not os.path.exists(REGISTRATION_FILE):
             return True
         
-        # Create a lock file approach compatible with C++
-        lock_acquired = False
-        max_attempts = 100  # 1 second timeout
-        
-        for _ in range(max_attempts):
-            try:
-                # Try to create lock file exclusively
-                with open(LOCK_FILE, 'x') as lock_file:
-                    lock_file.write(str(os.getpid()))
-                    lock_acquired = True
-                    break
-            except FileExistsError:
-                # Lock file exists, wait and retry
-                time.sleep(0.01)
-                continue
-        
-        if not lock_acquired:
+        if not _acquire_lock():
             return False
         
         try:
@@ -581,23 +572,7 @@ def _update_node_heartbeat_by_pid(pid: int) -> bool:
         if not os.path.exists(REGISTRATION_FILE):
             return False
         
-        # Create a lock file approach compatible with C++
-        lock_acquired = False
-        max_attempts = 100  # 1 second timeout
-        
-        for _ in range(max_attempts):
-            try:
-                # Try to create lock file exclusively
-                with open(LOCK_FILE, 'x') as lock_file:
-                    lock_file.write(str(os.getpid()))
-                    lock_acquired = True
-                    break
-            except FileExistsError:
-                # Lock file exists, wait and retry
-                time.sleep(0.01)
-                continue
-        
-        if not lock_acquired:
+        if not _acquire_lock():
             return False
         
         try:

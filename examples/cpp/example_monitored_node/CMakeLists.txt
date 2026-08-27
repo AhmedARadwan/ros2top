@@ -10,19 +10,29 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nlohmann_json REQUIRED)
-find_package(ros2top REQUIRED)
 
-# Include ros2top headers
-include_directories(${ros2top_INCLUDE_DIRS})
+# ros2top is a pip package, so its CMake config is not on CMake's default
+# search path unless it was installed system-wide. If this fails, run:
+#   colcon build --cmake-args -Dros2top_DIR=$(ros2top --cmake-dir)
+find_package(ros2top REQUIRED)
 
 # Create executable
 add_executable(example_monitored_node src/example_monitored_node.cpp)
 
-# Link dependencies
-ament_target_dependencies(example_monitored_node
-  rclcpp
-  std_msgs
-  nlohmann_json
+# Link dependencies.
+#
+# Imported targets rather than ament_target_dependencies(): that command is no
+# longer provided by ament_cmake on Rolling, so this package did not configure
+# there at all. rclcpp::rclcpp and ${std_msgs_TARGETS} exist on Humble, Jazzy,
+# Kilted and Rolling alike.
+#
+# ros2top::ros2top carries the include path, the C++17 requirement of
+# ros2top/ros2top.hpp, and nlohmann_json.
+target_link_libraries(example_monitored_node
+  rclcpp::rclcpp
+  ${std_msgs_TARGETS}
+  nlohmann_json::nlohmann_json
+  ros2top::ros2top
 )
 
 # Install executable
